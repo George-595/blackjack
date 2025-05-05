@@ -282,6 +282,7 @@ class BlackjackGame:
         
         st.toast(f"Player {player_idx + 1} draws: {new_card}", icon="🃏") 
         # No sleep needed here, rerun will update UI
+        time.sleep(1.0) # Add a pause to see the card drawn
 
         values, is_valid = self.calculate_hand_value(self.player_hands[player_idx])
         
@@ -325,9 +326,10 @@ class BlackjackGame:
             new_card = self.deck.deal()
             self.player_hands[player_idx].append(new_card)
             st.toast(f"Player {player_idx + 1} draws: {new_card}", icon="🃏") 
-            
+            time.sleep(1.0) # Pause after double down hit
+
             values, is_valid = self.calculate_hand_value(self.player_hands[player_idx])
-            self.player_stand_flags[player_idx] = True # Player is done after double down hit
+            self.player_stand_flags[player_idx] = True # Player is done after double down
 
             if not is_valid: # Player busts on double down
                 bust_value = min(values)
@@ -378,6 +380,7 @@ class BlackjackGame:
             new_card = self.deck.deal()
             self.dealer_hand.append(new_card)
             st.toast(f"Dealer draws: {new_card}", icon="🃏") # Still show toast for info
+            time.sleep(1.0) # Pause after dealer draws
 
             # Check if dealer busted with the new card - loop condition handles this
             new_values, new_is_valid = self.calculate_hand_value(self.dealer_hand)
@@ -542,6 +545,27 @@ class BlackjackGame:
              if not self.game_over:
                  self.advance_turn(check_dealer_turn=False)
 
+    def reset_game_state(self):
+        """Resets the entire game state to initial values, including balances and deck."""
+        st.toast("Resetting game state...", icon="🔄")
+        self.deck = Deck() # Reset and reshuffle the deck
+        self.dealer_hand: List[Card] = []
+        self.player_hands: List[List[Card]] = [[] for _ in range(self.num_players)]
+        self.player_balances: List[int] = [50] * self.num_players
+        self.dealer_balance: int = 10000
+        self.player_bets: List[int] = [5] * self.num_players
+        self.current_player_index: int = 0
+        self.player_stand_flags: List[bool] = [False] * self.num_players
+        self.player_bust_flags: List[bool] = [False] * self.num_players
+        self.player_messages: List[str] = [""] * self.num_players
+        self.game_over: bool = True # Game is over after reset, ready for new deal
+        self.dealer_turn_active: bool = False
+        self.insurance_offered: bool = False
+        self.player_insurance_bets: List[int] = [0] * self.num_players
+        self.player_made_insurance_decision: List[bool] = [False] * self.num_players
+        # Give a small delay for the toast message to be seen
+        time.sleep(0.5)
+
 # Initialize session state
 if 'game' not in st.session_state:
     # Initialize with default player count (will be updated by radio button)
@@ -655,55 +679,72 @@ if st.session_state.game.game_over and not st.session_state.game.insurance_offer
 
 # --- Game Control Buttons --- 
 
-# Deal New Hand Button (only visible when game is over)
-if st.session_state.game.game_over and not st.session_state.game.insurance_offered:
-    # Check if any player cannot afford the minimum bet
-    can_any_player_bet = any(st.session_state.game.player_balances[i] >= 5 for i in range(st.session_state.player_count))
-    can_dealer_afford = st.session_state.game.dealer_balance >= 5
-    deal_enabled = can_any_player_bet and can_dealer_afford
+# Create columns for Deal and Reset buttons
+control_cols = st.columns(2)
 
-    if st.button("Deal New Hand", use_container_width=True, disabled=not deal_enabled):
-        # Bets are already set by sliders, deal_initial_cards will use them
-        st.session_state.game.deal_initial_cards()
-        st.rerun() # Rerun to show the new hand / insurance phase
+with control_cols[0]:
+    # Deal New Hand Button (only visible when game is over)
+    if st.session_state.game.game_over and not st.session_state.game.insurance_offered:
+        # Check if any player cannot afford the minimum bet
+        can_any_player_bet = any(st.session_state.game.player_balances[i] >= 5 for i in range(st.session_state.player_count))
+        can_dealer_afford = st.session_state.game.dealer_balance >= 5
+        deal_enabled = can_any_player_bet and can_dealer_afford
 
-    if not deal_enabled:
-        st.warning("Cannot deal new hand. Check player/dealer balances.")
+        if st.button("Deal New Hand", use_container_width=True, disabled=not deal_enabled, key="deal_button"):
+            # Bets are already set by sliders, deal_initial_cards will use them
+            st.session_state.game.deal_initial_cards()
+            st.rerun() # Rerun to show the new hand / insurance phase
+
+        if not deal_enabled and st.session_state.game.game_over:
+            st.warning("Cannot deal. Check player/dealer min balances.")
+
+with control_cols[1]:
+    # Reset Game Button (Always visible? Or only when game over? Let's make it always visible for now)
+    if st.button("Reset Game", use_container_width=True, key="reset_button"):
+        st.session_state.game.reset_game_state()
+        st.rerun()
 
 # --- Hand Display Area (Only when game is active) ---
 if not st.session_state.game.game_over:
-    # --- Dealer Hand --- 
-    st.markdown("#### Dealer's Hand")
-    dealer_cards_html = '<div class="hand-container">'
-    # Show full hand if dealer's turn, game ended (e.g. BJ), or insurance resolved (dealer BJ check done)
-    show_dealer_full_hand = st.session_state.game.dealer_turn_active or \
-                            (st.session_state.game.insurance_offered and \
-                             all(st.session_state.game.player_made_insurance_decision)) or \
-                            st.session_state.game.game_over # game_over might be set early by BJs
-
-    for i, card in enumerate(st.session_state.game.dealer_hand):
-        if i == 0: # Always show the first card
-            dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-        elif show_dealer_full_hand: # Show the second card if needed
-            dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-        else: # Otherwise, show a hidden card placeholder
-            dealer_cards_html += f'<div class="card" style="background-color: grey; color: grey; display: flex; align-items: center; justify-content: center;">HIDDEN</div>'
-    dealer_cards_html += '</div>'
-    st.markdown(dealer_cards_html, unsafe_allow_html=True)
     
-    # Display dealer total only if hole card should be shown
-    if show_dealer_full_hand:
-        st.markdown(f'<div class="hand-total">Dealer Total: {st.session_state.game.get_hand_display_value(st.session_state.game.dealer_hand)}</div>', unsafe_allow_html=True)
-
-    st.markdown("---") # Separator
-
-    # --- Player Hands & Actions --- 
-    player_cols = st.columns(st.session_state.player_count)
-    current_player_idx = st.session_state.game.current_player_index
     game = st.session_state.game # Alias for shorter access
+    num_game_cols = game.num_players + 1 # One for dealer, one for each player
+    game_cols = st.columns(num_game_cols)
+    current_player_idx = game.current_player_index
+    
+    # --- Dealer Hand (in the first column) ---
+    with game_cols[0]:
+        st.markdown("#### Dealer's Hand")
+        dealer_cards_html = '<div class="hand-container">'
+        # Show full hand if dealer's turn, game ended (e.g. BJ), or insurance resolved (dealer BJ check done)
+        show_dealer_full_hand = game.dealer_turn_active or \
+                                (game.insurance_offered and \
+                                 all(game.player_made_insurance_decision)) or \
+                                game.game_over # game_over might be set early by BJs
+
+        for i, card in enumerate(game.dealer_hand):
+            if i == 0: # Always show the first card
+                dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+            elif show_dealer_full_hand: # Show the second card if needed
+                dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+            else: # Otherwise, show a hidden card placeholder
+                dealer_cards_html += f'<div class="card" style="background-color: grey; color: grey; display: flex; align-items: center; justify-content: center;">HIDDEN</div>'
+        dealer_cards_html += '</div>'
+        st.markdown(dealer_cards_html, unsafe_allow_html=True)
+        
+        # Display dealer total only if hole card should be shown
+        if show_dealer_full_hand:
+            st.markdown(f'<div class="hand-total">Dealer Total: {game.get_hand_display_value(game.dealer_hand)}</div>', unsafe_allow_html=True)
+
+    # st.markdown("---") # Separator - Remove this as columns handle separation
+
+    # --- Player Hands & Actions (in subsequent columns) --- 
+    # player_cols = st.columns(st.session_state.player_count) # Remove this, use game_cols
+    # current_player_idx = st.session_state.game.current_player_index # Already defined
+    # game = st.session_state.game # Already defined
 
     for i in range(game.num_players):
-        with player_cols[i]:
+        with game_cols[i + 1]: # Start from the second column (index 1)
             # Highlight current player during play phase OR during insurance phase
             is_player_active = (not game.player_stand_flags[i] and not game.player_bust_flags[i])
             is_regular_turn = (i == current_player_idx and is_player_active and not game.dealer_turn_active and not game.insurance_offered)
