@@ -803,7 +803,8 @@ if st.session_state.game.dealer_hand:
                 
                 # === Regular Play Phase Buttons ===
                 elif not game.insurance_offered: # Only show play buttons if insurance wasn't offered or is resolved
-                    action_cols = st.columns(4)
+                    # Use 3 columns now since Split is disabled
+                    action_cols = st.columns(3)
                     current_hand = game.player_hands[i]
                     current_balance = game.player_balances[i]
                     current_bet = game.player_bets[i] # Original bet before double
@@ -811,10 +812,7 @@ if st.session_state.game.dealer_hand:
                     # Check conditions based on current state
                     can_hit_stand = not game.player_stand_flags[i] and not game.player_bust_flags[i]
                     can_double = can_hit_stand and len(current_hand) == 2 and current_balance >= current_bet # Check balance vs original bet for doubling cost
-                    can_split = False # Disabled for now
-                    # can_split = (can_hit_stand and len(current_hand) == 2 and 
-                    #              current_hand[0].value == current_hand[1].value and 
-                    #              current_balance >= current_bet) # Check balance vs original bet
+                    # can_split = False # Disabled for now
 
                     with action_cols[0]:
                         if st.button("Hit", use_container_width=True, disabled=not can_hit_stand, key=f"hit_{i}"):
@@ -832,11 +830,10 @@ if st.session_state.game.dealer_hand:
                             else:
                                  game.double_down()
                                  st.rerun() 
-                    with action_cols[3]:
-                        if st.button("Split", use_container_width=True, disabled=True, key=f"split_{i}"):
-                            # game.split() # Call commented out
-                            st.warning("Split not implemented.")
-                            # st.rerun() # No rerun needed if action does nothing
+                    # Removed the 4th column for the disabled Split button
+                    # with action_cols[3]:
+                    #    if st.button("Split", use_container_width=True, disabled=True, key=f"split_{i}"):
+                    #        st.warning("Split not implemented.")
                             
             st.markdown('</div>' , unsafe_allow_html=True) # Close player highlight div
 
