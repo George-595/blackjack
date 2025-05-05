@@ -185,15 +185,22 @@ class BlackjackGame:
             self.game_over = True # End game immediately on bust
             
     def stand(self):
-        self.dealer_play()
-        self.evaluate_winner()
-        
+        # Old logic: 
+        # self.dealer_play()
+        # self.evaluate_winner()
+        # New logic: Just signal that it's the dealer's turn
+        self.dealer_turn_active = True
+        # Rerun will be handled by the button callback
+
     def double_down(self):
         if len(self.player_hands[self.current_hand_index]) == 2:
             self.current_bet *= 2
-            self.hit()
-            if not self.game_over:
-                self.stand() # Automatically stands after hitting in double down
+            self.hit() # Player takes one card
+            if not self.game_over: # Check if player busted
+                # Don't call stand directly. Signal dealer's turn.
+                # self.stand() # Automatically stands after hitting in double down
+                self.dealer_turn_active = True 
+                # Rerun will be handled by the button callback
                 
     def split(self):
         if (len(self.player_hands[self.current_hand_index]) == 2 and 
@@ -206,13 +213,14 @@ class BlackjackGame:
             self.player_hands[-1].append(self.deck.deal())
             
     def dealer_play(self):
-        # Indicate dealer's turn starts for UI update
-        self.dealer_turn_active = True
-        st.rerun() # Rerun to show the revealed card immediately
+        # REMOVED: Indicate dealer's turn starts for UI update
+        # self.dealer_turn_active = True
+        # REMOVED: Rerun to show the revealed card immediately
+        # st.rerun() 
+        # REMOVED: Short pause AFTER rerun 
+        # time.sleep(1)
 
-        # Short pause AFTER rerun to allow UI update before potentially long loop
-        time.sleep(1)
-
+        # --- Dealer hitting logic remains the same ---
         while True:
             values, is_valid = self.calculate_hand_value(self.dealer_hand)
             value_to_check = max(values) if is_valid else min(values)
@@ -243,24 +251,15 @@ class BlackjackGame:
                 # evaluate_winner will set the final game message
                 break # Stop playing if dealer busts
 
-        self.dealer_turn_active = False # Dealer's turn is over
-        # No need to rerun here, evaluate_winner will handle the final state update
+        # Ensure dealer turn is marked as over AFTER playing is complete
+        # This flag is now checked in the main script loop
+        self.dealer_turn_active = False 
+        # No need to rerun here, main script loop handles it via evaluate_winner
 
     def evaluate_winner(self):
-        # Ensure dealer plays only if player hasn't busted already
-        if not self.game_over:
-             # Check if dealer turn already happened (e.g., via stand)
-             # Only call dealer_play if it hasn't started yet.
-             # The stand() function will call this, then dealer_play itself.
-             # If called after a bust, dealer_play logic handles it.
-             # If called after double_down, stand() calls this, then dealer_play.
-             # Remove the redundant check and call:
-             # if not self.dealer_turn_active: # Avoid running dealer_play twice if stand was pressed
-             #     self.dealer_play()
-             pass # Keep the if block for structure, but do nothing here as stand/double_down handles it
-        # Ensure dealer play is complete before evaluating
-        # Small delay might be needed if dealer_play introduces async issues, but should be ok
-        # time.sleep(0.1)
+        # Remove the check/call to dealer_play here - it happens before this now
+        # if not self.game_over:
+        #     pass 
 
         player_values, player_valid = self.calculate_hand_value(self.player_hands[self.current_hand_index])
         dealer_values, dealer_valid = self.calculate_hand_value(self.dealer_hand)
@@ -309,7 +308,7 @@ class BlackjackGame:
 
         # Display result using toast
         st.toast(result_message, icon=result_icon)
-        st.rerun() # Rerun to update balances and potentially disable buttons
+        st.rerun() # Rerun AFTER evaluation to update balances and UI state
 
 # Initialize session state
 if 'game' not in st.session_state:
@@ -397,17 +396,32 @@ if st.session_state.game.dealer_hand: # Only display if a hand has been dealt
                 st.rerun() # Rerun to update UI immediately after hit/bust
         with cols_actions[1]:
             if st.button("Stand", use_container_width=True, disabled=not can_hit_stand):
-                st.session_state.game.stand() # This calls evaluate_winner which calls dealer_play
-                # No rerun needed here, evaluate_winner handles the final rerun
+                st.session_state.game.stand() # Calls the modified stand method
+                st.rerun() # Rerun after setting the flag in stand()
         with cols_actions[2]:
             if st.button("Double Down", use_container_width=True, disabled=not can_double):
                 st.session_state.game.double_down()
-                # No rerun needed here, evaluate_winner handles the final rerun
+                st.rerun() # Rerun after setting the flag in double_down()
         with cols_actions[3]:
              # Note: Split functionality is basic
             if st.button("Split", use_container_width=True, disabled=not can_split):
                 st.session_state.game.split()
                 st.warning("Split logic is basic. Playing multiple hands is not fully implemented.")
                 st.rerun()
+
+# === Add Dealer Turn Logic Here ===
+# Check if it's time for the dealer to play (triggered by Stand/Double Down + rerun)
+if st.session_state.game.dealer_turn_active and not st.session_state.game.game_over:
+    # Reveal dealer's hidden card visually BEFORE playing starts
+    # This requires the UI to have access to dealer_turn_active state
+    # which it already does. The initial rerun in stand()/double_down() handles showing the card.
+    # Add a small pause after the reveal before the dealer hits rapidly.
+    st.toast("Dealer reveals hidden card...", icon="👀")
+    time.sleep(1.5) # Slightly longer pause for reveal
+
+    st.session_state.game.dealer_play() # Dealer plays their hand fully
+    # dealer_play now sets dealer_turn_active = False
+    st.session_state.game.evaluate_winner() # Evaluate outcome immediately after
+    # evaluate_winner handles the final rerun to show results
 
 st.markdown('</div>', unsafe_allow_html=True) # Close game-container 
