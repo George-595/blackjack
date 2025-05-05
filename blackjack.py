@@ -247,8 +247,10 @@ class BlackjackGame:
              # The stand() function will call this, then dealer_play itself.
              # If called after a bust, dealer_play logic handles it.
              # If called after double_down, stand() calls this, then dealer_play.
-             if not self.dealer_turn_active: # Avoid running dealer_play twice if stand was pressed
-                 self.dealer_play()
+             # Remove the redundant check and call:
+             # if not self.dealer_turn_active: # Avoid running dealer_play twice if stand was pressed
+             #     self.dealer_play()
+             pass # Keep the if block for structure, but do nothing here as stand/double_down handles it
         # Ensure dealer play is complete before evaluating
         # Small delay might be needed if dealer_play introduces async issues, but should be ok
         # time.sleep(0.1)
