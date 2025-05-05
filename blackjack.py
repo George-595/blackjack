@@ -17,6 +17,10 @@ st.markdown("""
     height: 120px;
     text-align: center;
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    transition: transform 0.3s ease-in-out; /* Animation for card reveal */
+}
+.card:hover {
+    transform: scale(1.05);
 }
 .card.red {
     color: red;
@@ -29,6 +33,7 @@ st.markdown("""
     flex-wrap: wrap;
     gap: 10px;
     margin: 10px 0;
+    min-height: 140px; /* Ensure space for cards */
 }
 .game-container {
     max-width: 800px;
@@ -40,25 +45,6 @@ st.markdown("""
     padding: 10px;
     border-radius: 5px;
     margin: 10px 0;
-}
-.message {
-    font-size: 1.2em;
-    font-weight: bold;
-    padding: 10px;
-    border-radius: 5px;
-    margin: 10px 0;
-}
-.message.win {
-    background-color: #d4edda;
-    color: #155724;
-}
-.message.lose {
-    background-color: #f8d7da;
-    color: #721c24;
-}
-.message.push {
-    background-color: #fff3cd;
-    color: #856404;
 }
 .hand-total {
     font-size: 1.2em;
@@ -132,7 +118,8 @@ class BlackjackGame:
         self.dealer_balance = 50
         self.current_bet = 5
         self.game_over = False
-        self.message = ""
+        self.message = "" # Keep for potential internal logic, but UI uses toasts
+        self.dealer_turn_active = False # Track if it's dealer's turn for UI updates
         
     def calculate_hand_value(self, hand: List[Card]) -> Tuple[List[int], bool]:
         value = 0
@@ -202,7 +189,7 @@ class BlackjackGame:
             self.current_bet *= 2
             self.hit()
             if not self.game_over:
-                self.stand()
+                self.stand() # Automatically stands after hitting in double down
                 
     def split(self):
         if (len(self.player_hands[self.current_hand_index]) == 2 and 
@@ -215,93 +202,114 @@ class BlackjackGame:
             self.player_hands[-1].append(self.deck.deal())
             
     def dealer_play(self):
-        st.markdown("---") # Add separator
-        st.markdown("#### Dealer's Turn")
+        # Indicate dealer's turn starts for UI update
+        self.dealer_turn_active = True
+        st.rerun() # Rerun to show the revealed card immediately
 
-        # Helper function to display the current dealer hand within this turn's section
-        def display_dealer_hand_section():
-            dealer_cards_html = '<div class="hand-container">'
-            for card in self.dealer_hand:
-                 dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-            dealer_cards_html += '</div>'
-            st.markdown(dealer_cards_html, unsafe_allow_html=True)
-            st.markdown(f'<div class="hand-total">Dealer Total: {self.get_hand_display_value(self.dealer_hand)}</div>', unsafe_allow_html=True)
-
-        # Initial display of the revealed hand at the start of the dealer's turn
-        display_dealer_hand_section()
-        time.sleep(1) # Pause to show the initial revealed hand
+        # Short pause to simulate revealing the card
+        time.sleep(1)
 
         while True:
             values, is_valid = self.calculate_hand_value(self.dealer_hand)
-            # Use highest valid value if available, otherwise the minimum busted value
-            value_to_check = max(values) if is_valid else min(values) 
+            value_to_check = max(values) if is_valid else min(values)
 
-            # Stand condition: valid value >= 17 OR already busted (not is_valid)
+            # Stand condition: valid value >= 17 OR already busted
             if not is_valid or value_to_check >= 17:
-                # if is_valid: # Only say "stands" if not busted
-                     # st.write("Dealer stands.") # REMOVE THIS LINE
-                # No need to explicitly handle bust message here, it's shown after the hit if it occurs
+                if is_valid:
+                    st.toast("Dealer stands.", icon="🛑")
+                # Bust message will be handled by evaluate_winner or shown by total display
                 break # Exit loop
 
             # Hit condition
-            # st.write("Dealer hits...") # Already removed
+            st.toast("Dealer hits...", icon="🃏")
             time.sleep(1) # Pause before drawing
             new_card = self.deck.deal()
             self.dealer_hand.append(new_card)
-
-            # Redisplay the hand *with the new card*
-            # st.write("Dealer draws:") # Already removed
-            display_dealer_hand_section() # Call display function again to show the updated hand
+            st.toast(f"Dealer draws: {new_card}", icon="🃏")
+            st.rerun() # Rerun to update the UI with the new card
             time.sleep(1) # Pause after showing the new card and total
 
             # Check if dealer busted with the new card
             new_values, new_is_valid = self.calculate_hand_value(self.dealer_hand)
             if not new_is_valid:
-                # The bust message is implicitly shown by display_dealer_hand_section showing "Bust (value)"
-                # Add an explicit message for clarity
-                # st.write(f"Dealer busts with {min(new_values)}!") # REMOVE THIS LINE
+                # Bust is implicitly shown by the total changing to "Bust (value)"
+                # evaluate_winner will set the final game message
                 break # Stop playing if dealer busts
+
+        self.dealer_turn_active = False # Dealer's turn is over
+        # No need to rerun here, evaluate_winner will handle the final state update
 
     def evaluate_winner(self):
         # Ensure dealer plays only if player hasn't busted already
-        if not self.game_over: # Check if player already busted during their turn
-             self.dealer_play()
+        if not self.game_over:
+             # Check if dealer turn already happened (e.g., via stand)
+             # Only call dealer_play if it hasn't started yet.
+             # The stand() function will call this, then dealer_play itself.
+             # If called after a bust, dealer_play logic handles it.
+             # If called after double_down, stand() calls this, then dealer_play.
+             if not self.dealer_turn_active: # Avoid running dealer_play twice if stand was pressed
+                 self.dealer_play()
+        # Ensure dealer play is complete before evaluating
+        # Small delay might be needed if dealer_play introduces async issues, but should be ok
+        # time.sleep(0.1)
 
-        # Now evaluate based on final hands, considering if player/dealer already busted
         player_values, player_valid = self.calculate_hand_value(self.player_hands[self.current_hand_index])
         dealer_values, dealer_valid = self.calculate_hand_value(self.dealer_hand)
-        
-        player_value = max(player_values) if player_valid else min(player_values) # Use min value if busted
-        dealer_value = max(dealer_values) if dealer_valid else min(dealer_values) # Use min value if busted
-        
-        st.markdown("---") # Separator before results
-        st.markdown("#### Results")
-        
-        # Use message generated during player/dealer turns if they busted
-        if "busts" in self.message: 
-            pass # Message already set during hit() or dealer_play()
+
+        player_value = max(player_values) if player_valid else min(player_values)
+        dealer_value = max(dealer_values) if dealer_valid else min(dealer_values)
+
+        result_message = ""
+        result_icon = "🏁"
+
+        # Use message generated during player hit() if player busted
+        if "busts" in self.message:
+            result_message = self.message # Already set during hit()
+            result_icon = "💥"
+            # Balance already adjusted in hit()
         elif not dealer_valid:
-            self.message = f"Dealer busts with {dealer_value}! Player wins!"
+            result_message = f"Dealer busts with {dealer_value}! Player wins!"
             self.player_balance += self.current_bet
             self.dealer_balance -= self.current_bet
+            result_icon = "🎉"
+        elif not player_valid: # Check again in case hit() logic changes
+             result_message = f"Player busts with {player_value}! Dealer wins!"
+             # Balance already adjusted in hit() if it happened there
+             # If somehow bust happened without hit(), adjust here (less likely)
+             if not self.game_over: # Avoid double adjustment
+                 self.dealer_balance += self.current_bet
+                 self.player_balance -= self.current_bet
+             result_icon = "👎"
         elif player_value > dealer_value:
-            self.message = "Player wins!"
+            result_message = "Player wins!"
             self.player_balance += self.current_bet
             self.dealer_balance -= self.current_bet
+            result_icon = "🎉"
         elif dealer_value > player_value:
-            self.message = "Dealer wins!"
+            result_message = "Dealer wins!"
             self.dealer_balance += self.current_bet
             self.player_balance -= self.current_bet
+            result_icon = "👎"
         else:
-            self.message = "Push!"
-            
+            result_message = "Push!"
+            result_icon = "🤝"
+
+        self.message = result_message # Update internal message state
         self.game_over = True
+        self.dealer_turn_active = False # Ensure dealer turn is marked as over
+
+        # Display result using toast
+        st.toast(result_message, icon=result_icon)
+        st.rerun() # Rerun to update balances and potentially disable buttons
 
 # Initialize session state
 if 'game' not in st.session_state:
     st.session_state.game = BlackjackGame()
 if 'player_count' not in st.session_state:
     st.session_state.player_count = 1
+# Add dealer_turn_active initialization if game object is recreated
+if not hasattr(st.session_state.game, 'dealer_turn_active'):
+     st.session_state.game.dealer_turn_active = False
 
 # Streamlit UI
 st.title("Blackjack")
@@ -328,6 +336,8 @@ st.session_state.game.current_bet = bet
 if st.button("Deal New Hand", use_container_width=True):
     st.session_state.game.deal_initial_cards()
     st.session_state.game.game_over = False
+    st.session_state.game.dealer_turn_active = False # Reset dealer turn state
+    st.rerun() # Rerun to show the new hand
 
 # Display hands side-by-side
 if st.session_state.game.dealer_hand: # Only display if a hand has been dealt
@@ -336,19 +346,20 @@ if st.session_state.game.dealer_hand: # Only display if a hand has been dealt
     with col1:
         st.markdown("#### Dealer's Hand")
         dealer_cards_html = '<div class="hand-container">'
-        # Show only the first card unless game is over
+        # Show only the first card unless game is over OR it's the dealer's turn
+        show_dealer_full_hand = st.session_state.game.game_over or st.session_state.game.dealer_turn_active
         for i, card in enumerate(st.session_state.game.dealer_hand):
             if i == 0: # Always show the first card
                 dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-            elif st.session_state.game.game_over: # Show the second card only if the game is over
+            elif show_dealer_full_hand: # Show the second card if game over or dealer's turn
                 dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
             else: # Otherwise, show a hidden card placeholder
                 dealer_cards_html += f'<div class="card" style="background-color: grey; color: grey; display: flex; align-items: center; justify-content: center;">HIDDEN</div>'
         dealer_cards_html += '</div>'
         st.markdown(dealer_cards_html, unsafe_allow_html=True)
         
-        # Display dealer total only if game is over
-        if st.session_state.game.game_over:
+        # Display dealer total only if game is over or it's the dealer's turn
+        if show_dealer_full_hand:
             st.markdown(f'<div class="hand-total">Dealer Total: {st.session_state.game.get_hand_display_value(st.session_state.game.dealer_hand)}</div>', unsafe_allow_html=True)
 
     with col2:
@@ -377,22 +388,17 @@ if st.session_state.game.dealer_hand: # Only display if a hand has been dealt
                 st.rerun() # Rerun to update UI immediately after hit/bust
         with cols_actions[1]:
             if st.button("Stand", use_container_width=True, disabled=not can_hit_stand):
-                st.session_state.game.stand() # This triggers dealer_play internally
-                st.rerun() # Rerun to show dealer play and results
+                st.session_state.game.stand() # This calls evaluate_winner which calls dealer_play
+                # No rerun needed here, evaluate_winner handles the final rerun
         with cols_actions[2]:
             if st.button("Double Down", use_container_width=True, disabled=not can_double):
                 st.session_state.game.double_down()
-                st.rerun() # Rerun to show results after double down
+                # No rerun needed here, evaluate_winner handles the final rerun
         with cols_actions[3]:
              # Note: Split functionality is basic
-            if st.button("Split", use_container_width=True, disabled=not can_split): 
+            if st.button("Split", use_container_width=True, disabled=not can_split):
                 st.session_state.game.split()
                 st.warning("Split logic is basic. Playing multiple hands is not fully implemented.")
                 st.rerun()
-
-    # Display game message with styling (kept below actions)
-    if st.session_state.game.message:
-        message_class = "win" if "wins" in st.session_state.game.message else ("lose" if ("busts" in st.session_state.game.message or "Dealer wins" in st.session_state.game.message) else "push")
-        st.markdown(f'<div class="message {message_class}">{st.session_state.game.message}</div>', unsafe_allow_html=True)
 
 st.markdown('</div>', unsafe_allow_html=True) # Close game-container 
