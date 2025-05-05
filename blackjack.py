@@ -424,15 +424,15 @@ class BlackjackGame:
             player_display = self.get_hand_display_value(self.player_hands[player_idx])
 
             if not dealer_valid:
-                result_message += f"Wins! Dealer busts ({dealer_display_value})."
+                result_message += f"Wins £{bet}! Dealer busts ({dealer_display_value})."
                 self.player_balances[player_idx] += bet
                 self.dealer_balance -= bet
             elif player_value > dealer_value:
-                result_message += f"Wins! ({player_display} vs {dealer_display_value})"
+                result_message += f"Wins £{bet}! ({player_display} vs {dealer_display_value})"
                 self.player_balances[player_idx] += bet
                 self.dealer_balance -= bet
             elif dealer_value > player_value:
-                result_message += f"Loses. ({player_display} vs {dealer_display_value})"
+                result_message += f"Loses £{bet}. ({player_display} vs {dealer_display_value})"
                 self.dealer_balance += bet
                 self.player_balances[player_idx] -= bet
             else: # Push
@@ -516,7 +516,7 @@ class BlackjackGame:
                     message += "Pushes original bet (both Blackjack)."
                     # No change to balance for original bet
                 else:
-                    message += "Loses original bet."
+                    message += f"Loses original bet (£{player_bet})."
                     self.player_balances[i] -= player_bet
                     self.dealer_balance += player_bet
                 
@@ -704,8 +704,9 @@ with control_cols[1]:
         st.session_state.game.reset_game_state()
         st.rerun()
 
-# --- Hand Display Area (Only when game is active) ---
-if not st.session_state.game.game_over:
+# --- Hand Display Area (Shows after first deal) ---
+# Display this section if cards have been dealt (dealer hand exists)
+if st.session_state.game.dealer_hand:
     
     game = st.session_state.game # Alias for shorter access
     num_game_cols = game.num_players + 1 # One for dealer, one for each player
@@ -716,11 +717,9 @@ if not st.session_state.game.game_over:
     with game_cols[0]:
         st.markdown("#### Dealer's Hand")
         dealer_cards_html = '<div class="hand-container">'
-        # Show full hand if dealer's turn, game ended (e.g. BJ), or insurance resolved (dealer BJ check done)
-        show_dealer_full_hand = game.dealer_turn_active or \
-                                (game.insurance_offered and \
-                                 all(game.player_made_insurance_decision)) or \
-                                game.game_over # game_over might be set early by BJs
+        # Show full hand if the game is over OR the dealer's turn is active
+        show_dealer_full_hand = game.game_over or game.dealer_turn_active
+        # (Insurance resolution implicitly sets game_over if dealer has BJ, or allows play to continue)
 
         for i, card in enumerate(game.dealer_hand):
             if i == 0: # Always show the first card
