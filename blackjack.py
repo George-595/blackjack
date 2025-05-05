@@ -771,9 +771,15 @@ if st.session_state.game.dealer_hand:
             elif game.player_stand_flags[i]: # Includes players who stood or got non-winning BJ
                 st.info("Finished") # More neutral term than STOOD
 
-            # --- Action Buttons Logic --- 
+            # --- Action Buttons Logic ---
             # Buttons are only shown for the player whose turn it is
             if is_current_turn:
+                # Display whose turn it is
+                if game.num_players == 1:
+                    st.markdown("**Your Go**")
+                else:
+                    st.markdown(f"**Player {i+1}'s Turn**")
+
                 # === Insurance Phase Buttons ===
                 if game.insurance_offered and not game.player_made_insurance_decision[i]:
                     st.markdown("**Insurance?**")
@@ -819,7 +825,7 @@ if st.session_state.game.dealer_hand:
                             game.stand() 
                             st.rerun() 
                     with action_cols[2]:
-                        if st.button("Double", use_container_width=True, disabled=not can_double, key=f"double_{i}"):
+                        if st.button("Double Down", use_container_width=True, disabled=not can_double, key=f"double_{i}"):
                             # Double down cost is the original bet amount again
                             if game.player_balances[i] < game.player_bets[i]:
                                  st.warning(f"Need £{game.player_bets[i]} more to double.")
