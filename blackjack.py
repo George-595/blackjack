@@ -325,23 +325,22 @@ if st.session_state.game.dealer_hand:
     st.markdown("---")
     st.markdown("#### Dealer's Hand")
     dealer_cards_html = '<div class="hand-container">'
-    # Show only the first card unless game is over or it's dealer's turn
-    if not st.session_state.game.game_over and len(st.session_state.game.dealer_hand) > 0 : # Simplified: Always show full hand for now
-         # TODO: Implement showing only one card initially
-        for i, card in enumerate(st.session_state.game.dealer_hand):
-             #if i == 0 or st.session_state.game.game_over: # Logic to hide second card
-             dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-             #else:
-             #    dealer_cards_html += f'<div class="card" style="background-color: grey;">HIDDEN</div>' # Placeholder for hidden card
-    else: # Show full hand if game is over
-         for card in st.session_state.game.dealer_hand:
-             dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+    # Show only the first card unless game is over
+    for i, card in enumerate(st.session_state.game.dealer_hand):
+        if i == 0: # Always show the first card
+            dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+        elif st.session_state.game.game_over: # Show the second card only if the game is over
+            dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+        else: # Otherwise, show a hidden card placeholder
+            # Added styling to center the text and make it grey
+            dealer_cards_html += f'<div class="card" style="background-color: grey; color: grey; display: flex; align-items: center; justify-content: center;">HIDDEN</div>'
 
     dealer_cards_html += '</div>'
     st.markdown(dealer_cards_html, unsafe_allow_html=True)
-    # Display dealer total only if game is over or it's dealer's turn (or always for simplicity now)
-    #if st.session_state.game.game_over: # Simplified: Always show total
-    st.markdown(f'<div class="hand-total">Total: {st.session_state.game.get_hand_display_value(st.session_state.game.dealer_hand)}</div>', unsafe_allow_html=True)
+    
+    # Display dealer total only if game is over
+    if st.session_state.game.game_over:
+        st.markdown(f'<div class="hand-total">Dealer Total: {st.session_state.game.get_hand_display_value(st.session_state.game.dealer_hand)}</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("#### Player's Hand")
