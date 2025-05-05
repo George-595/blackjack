@@ -329,72 +329,70 @@ if st.button("Deal New Hand", use_container_width=True):
     st.session_state.game.deal_initial_cards()
     st.session_state.game.game_over = False
 
-# Display hands
-if st.session_state.game.dealer_hand:
-    st.markdown("---")
-    st.markdown("#### Dealer's Hand")
-    dealer_cards_html = '<div class="hand-container">'
-    # Show only the first card unless game is over
-    for i, card in enumerate(st.session_state.game.dealer_hand):
-        if i == 0: # Always show the first card
-            dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-        elif st.session_state.game.game_over: # Show the second card only if the game is over
-            dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-        else: # Otherwise, show a hidden card placeholder
-            # Added styling to center the text and make it grey
-            dealer_cards_html += f'<div class="card" style="background-color: grey; color: grey; display: flex; align-items: center; justify-content: center;">HIDDEN</div>'
+# Display hands side-by-side
+if st.session_state.game.dealer_hand: # Only display if a hand has been dealt
+    col1, col2 = st.columns(2)
 
-    dealer_cards_html += '</div>'
-    st.markdown(dealer_cards_html, unsafe_allow_html=True)
-    
-    # Display dealer total only if game is over
-    if st.session_state.game.game_over:
-        st.markdown(f'<div class="hand-total">Dealer Total: {st.session_state.game.get_hand_display_value(st.session_state.game.dealer_hand)}</div>', unsafe_allow_html=True)
+    with col1:
+        st.markdown("#### Dealer's Hand")
+        dealer_cards_html = '<div class="hand-container">'
+        # Show only the first card unless game is over
+        for i, card in enumerate(st.session_state.game.dealer_hand):
+            if i == 0: # Always show the first card
+                dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+            elif st.session_state.game.game_over: # Show the second card only if the game is over
+                dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+            else: # Otherwise, show a hidden card placeholder
+                dealer_cards_html += f'<div class="card" style="background-color: grey; color: grey; display: flex; align-items: center; justify-content: center;">HIDDEN</div>'
+        dealer_cards_html += '</div>'
+        st.markdown(dealer_cards_html, unsafe_allow_html=True)
+        
+        # Display dealer total only if game is over
+        if st.session_state.game.game_over:
+            st.markdown(f'<div class="hand-total">Dealer Total: {st.session_state.game.get_hand_display_value(st.session_state.game.dealer_hand)}</div>', unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("#### Player's Hand")
-    player_cards_html = '<div class="hand-container">'
-    for card in st.session_state.game.player_hands[st.session_state.game.current_hand_index]:
-        player_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-    player_cards_html += '</div>'
-    st.markdown(player_cards_html, unsafe_allow_html=True)
-    st.markdown(f'<div class="hand-total">Total: {st.session_state.game.get_hand_display_value(st.session_state.game.player_hands[st.session_state.game.current_hand_index])}</div>', unsafe_allow_html=True)
-    
-    # Game actions
+    with col2:
+        st.markdown("#### Player's Hand")
+        player_cards_html = '<div class="hand-container">'
+        for card in st.session_state.game.player_hands[st.session_state.game.current_hand_index]:
+            player_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+        player_cards_html += '</div>'
+        st.markdown(player_cards_html, unsafe_allow_html=True)
+        st.markdown(f'<div class="hand-total">Player Total: {st.session_state.game.get_hand_display_value(st.session_state.game.player_hands[st.session_state.game.current_hand_index])}</div>', unsafe_allow_html=True)
+
+    # Separator before action buttons
+    st.markdown("---") 
+
+    # Game actions (kept below the hands)
     if not st.session_state.game.game_over:
-        col1, col2, col3, col4 = st.columns(4)
+        cols_actions = st.columns(4)
         # Disable buttons if player cannot perform action
         can_hit_stand = not st.session_state.game.game_over
         can_double = can_hit_stand and len(st.session_state.game.player_hands[st.session_state.game.current_hand_index]) == 2 and st.session_state.game.player_balance >= st.session_state.game.current_bet * 2
         can_split = can_hit_stand and len(st.session_state.game.player_hands[st.session_state.game.current_hand_index]) == 2 and st.session_state.game.player_hands[st.session_state.game.current_hand_index][0].value == st.session_state.game.player_hands[st.session_state.game.current_hand_index][1].value and st.session_state.game.player_balance >= st.session_state.game.current_bet * 2 # Add balance check for split too
 
-        with col1:
+        with cols_actions[0]:
             if st.button("Hit", use_container_width=True, disabled=not can_hit_stand):
                 st.session_state.game.hit()
-                # Rerun script to update UI immediately after hit
-                if not st.session_state.game.game_over: # Only rerun if game didn't end
-                     st.rerun() 
-                else: # If busted, show message and final state
-                     st.rerun() # Rerun to show bust message and disable buttons
-        with col2:
+                st.rerun() # Rerun to update UI immediately after hit/bust
+        with cols_actions[1]:
             if st.button("Stand", use_container_width=True, disabled=not can_hit_stand):
-                st.session_state.game.stand()
+                st.session_state.game.stand() # This triggers dealer_play internally
                 st.rerun() # Rerun to show dealer play and results
-        with col3:
+        with cols_actions[2]:
             if st.button("Double Down", use_container_width=True, disabled=not can_double):
                 st.session_state.game.double_down()
                 st.rerun() # Rerun to show results after double down
-        with col4:
-             # Note: Split functionality is basic and needs more logic for playing multiple hands
+        with cols_actions[3]:
+             # Note: Split functionality is basic
             if st.button("Split", use_container_width=True, disabled=not can_split): 
                 st.session_state.game.split()
-                # TODO: Add logic to handle playing split hands
                 st.warning("Split logic is basic. Playing multiple hands is not fully implemented.")
                 st.rerun()
 
-    # Display game message with styling
+    # Display game message with styling (kept below actions)
     if st.session_state.game.message:
         message_class = "win" if "wins" in st.session_state.game.message else ("lose" if ("busts" in st.session_state.game.message or "Dealer wins" in st.session_state.game.message) else "push")
         st.markdown(f'<div class="message {message_class}">{st.session_state.game.message}</div>', unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True) 
+st.markdown('</div>', unsafe_allow_html=True) # Close game-container 
