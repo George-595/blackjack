@@ -206,18 +206,54 @@ class BlackjackGame:
         # Check dealer upcard for insurance offer condition
         dealer_upcard = self.dealer_hand[0] # The visible card
         offer_insurance_on_ace = dealer_upcard.value == 'A'
-        offer_insurance_on_ten = dealer_upcard.get_value() == 10
+        # Insurance should only be offered on Ace upcard according to standard rules
+        # offer_insurance_on_ten = dealer_upcard.get_value() == 10 # Removed this condition
 
-        if offer_insurance_on_ace or offer_insurance_on_ten:
+        if offer_insurance_on_ace: # Only offer insurance if dealer shows Ace
              self.insurance_offered = True
-             st.toast(f"Dealer showing {dealer_upcard.value}. Insurance offered!", icon="❓")
-             # Pause game flow - UI will show insurance options for player 0
+             st.toast(f"Dealer showing Ace. Insurance offered!", icon="❓")
+             # Set current player to 0 to start insurance decisions
+             self.current_player_index = 0 
+             # UI will show insurance options for player 0
              # Resolution will happen after player(s) choose
         else:
-             # No insurance offered, proceed to check player BJs and advance turn
+             # No insurance offered, proceed to check player BJs and set the first turn
              self.check_player_blackjacks() # Check for player BJs vs non-BJ dealer
-             if not self.game_over: # Only advance if BJ didn't end game
-                  self.advance_turn(check_dealer_turn=False) # Start player 0 turn if no BJs
+             
+             if not self.game_over: # Only proceed if the game didn't end due to all players having BJ
+                  # Find the first player who needs to play (hasn't stood/busted/got BJ)
+                  first_playable_player = -1
+                  for i in range(self.num_players):
+                       # Check flags set by check_player_blackjacks
+                       if not self.player_stand_flags[i] and not self.player_bust_flags[i]:
+                           first_playable_player = i
+                           break # Found the first player
+                  
+                  if first_playable_player != -1:
+                      # Set the current player index correctly
+                      self.current_player_index = first_playable_player
+                      # Optional: Toast notification for the first player's turn
+                      # st.toast(f"Player {self.current_player_index + 1}'s turn.", icon="👤")
+                  else:
+                      # Edge case: All players finished immediately (e.g., all got Blackjack)
+                      # check_player_blackjacks should set self.game_over = True in this case.
+                      # If not, check if dealer needs to play (only if some players stood without busting)
+                      all_players_finished = all(self.player_stand_flags[i] or self.player_bust_flags[i] for i in range(self.num_players))
+                      if all_players_finished:
+                          any_player_active = any(not self.player_bust_flags[i] for i in range(self.num_players))
+                          if any_player_active:
+                              # This should generally only happen if dealer check was missed?
+                              # But as a safeguard, trigger dealer turn if players stood and dealer needs to play.
+                              st.toast("Dealer's turn!", icon="🤖")
+                              self.dealer_turn_active = True
+                          else:
+                              # All busted or pushed with BJ - game is effectively over
+                              if not self.game_over: # Ensure game over is set if missed earlier
+                                   st.toast("All players finished.", icon="🏁") 
+                                   self.game_over = True
+                      # Note: We no longer call advance_turn here. The state is set, 
+                      # and the UI rerender will reflect the correct player's turn or game state.
+                      # self.advance_turn(check_dealer_turn=False) # REMOVED THIS CALL
 
     def check_player_blackjacks(self):
         """Checks for player Blackjacks ONLY. Assumes dealer does NOT have BJ.
