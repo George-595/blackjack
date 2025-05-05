@@ -92,11 +92,13 @@ class Deck:
     def __init__(self):
         self.suits = ['Hearts', 'Diamonds', 'Spades', 'Clubs']
         self.values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+        self.num_decks = 6 # Define the number of decks
         self.cards = []
         self.reset_deck()
         
     def reset_deck(self):
-        self.cards = [Card(suit, value) for suit in self.suits for value in self.values]
+        # Create cards for the specified number of decks
+        self.cards = [Card(suit, value) for _ in range(self.num_decks) for suit in self.suits for value in self.values]
         self.shuffle()
         
     def shuffle(self):
@@ -104,6 +106,8 @@ class Deck:
         
     def deal(self) -> Card:
         if not self.cards:
+            st.warning("Reshuffling the shoe...") # Inform user about reshuffle
+            time.sleep(1) # Short pause for the message
             self.reset_deck()
         return self.cards.pop()
 
@@ -206,7 +210,7 @@ class BlackjackGame:
         self.dealer_turn_active = True
         st.rerun() # Rerun to show the revealed card immediately
 
-        # Short pause to simulate revealing the card
+        # Short pause AFTER rerun to allow UI update before potentially long loop
         time.sleep(1)
 
         while True:
@@ -222,12 +226,15 @@ class BlackjackGame:
 
             # Hit condition
             st.toast("Dealer hits...", icon="🃏")
-            time.sleep(1) # Pause before drawing
+            # Remove delay before drawing as UI won't update mid-loop
+            # time.sleep(1) # Pause before drawing
             new_card = self.deck.deal()
             self.dealer_hand.append(new_card)
-            st.toast(f"Dealer draws: {new_card}", icon="🃏")
-            st.rerun() # Rerun to update the UI with the new card
-            time.sleep(1) # Pause after showing the new card and total
+            st.toast(f"Dealer draws: {new_card}", icon="🃏") # Still show toast for info
+            # REMOVE RERUN FROM INSIDE THE LOOP
+            # st.rerun() # Rerun to update the UI with the new card
+            # REMOVE SLEEP FROM INSIDE THE LOOP
+            # time.sleep(1) # Pause after showing the new card and total
 
             # Check if dealer busted with the new card
             new_values, new_is_valid = self.calculate_hand_value(self.dealer_hand)
