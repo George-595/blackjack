@@ -507,6 +507,10 @@ class BlackjackGame:
  
         # Modify the original hand
         self.player_hands[player_idx][hand_idx] = [card1] 
+        
+        # Add clarification toast
+        st.toast(f"Hand {hand_idx + 1} starts with {card1}, Hand {new_hand_idx + 1} starts with {card2}", icon="✨")
+        time.sleep(0.8) # Short pause to see the message
  
         # Deal one card to each new hand
         st.toast("Dealing to split hands...", icon="🃏")
