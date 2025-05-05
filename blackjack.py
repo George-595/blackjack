@@ -496,35 +496,37 @@ class BlackjackGame:
         dealer_has_blackjack = self.get_hand_display_value(self.dealer_hand) == "Blackjack!"
 
         if dealer_has_blackjack:
-            st.warning("Dealer Blackjack!")
-            self.dealer_turn_active = True # Reveal dealer's hand
-            for i in range(self.num_players):
-                insurance_bet = self.player_insurance_bets[i]
-                player_bet = self.player_bets[i]
-                player_bj = self.get_hand_display_value(self.player_hands[i]) == "Blackjack!"
-                message = f"Player {i+1}: "
+            # ... (existing code for dealer having blackjack) ...
+            # st.warning("Dealer Blackjack!")
+            # self.dealer_turn_active = True # Reveal dealer's hand
+            # for i in range(self.num_players):
+            #     insurance_bet = self.player_insurance_bets[i]
+            #     player_bet = self.player_bets[i]
+            #     player_bj = self.get_hand_display_value(self.player_hands[i]) == "Blackjack!"
+            #     message = f"Player {i+1}: "
                 
-                # Settle insurance bet
-                if insurance_bet > 0:
-                     payout = insurance_bet * 2
-                     self.player_balances[i] += payout 
-                     self.dealer_balance -= payout
-                     message += f"Wins £{payout} insurance. "
+            #     # Settle insurance bet
+            #     if insurance_bet > 0:
+            #          payout = insurance_bet * 2
+            #          self.player_balances[i] += payout 
+            #          self.dealer_balance -= payout
+            #          message += f"Wins £{payout} insurance. "
                 
-                # Settle original bet (vs Dealer BJ)
-                if player_bj:
-                    message += "Pushes original bet (both Blackjack)."
-                    # No change to balance for original bet
-                else:
-                    message += f"Loses original bet (£{player_bet})."
-                    self.player_balances[i] -= player_bet
-                    self.dealer_balance += player_bet
+            #     # Settle original bet (vs Dealer BJ)
+            #     if player_bj:
+            #         message += "Pushes original bet (both Blackjack)."
+            #         # No change to balance for original bet
+            #     else:
+            #         message += f"Loses original bet (£{player_bet})."
+            #         self.player_balances[i] -= player_bet
+            #         self.dealer_balance += player_bet
                 
-                self.player_messages[i] = message
-                self.player_stand_flags[i] = True # Hand is over
+            #     self.player_messages[i] = message
+            #     self.player_stand_flags[i] = True # Hand is over
             
-            self.game_over = True
-            self.insurance_offered = False # Insurance phase is done
+            # self.game_over = True
+            # self.insurance_offered = False # Insurance phase is done
+            pass # Keep existing code here
 
         else: # Dealer does NOT have Blackjack
              st.info("Dealer does not have Blackjack.")
@@ -535,15 +537,41 @@ class BlackjackGame:
                      self.player_balances[i] -= insurance_bet
                      self.dealer_balance += insurance_bet
                      losing_insurance_total += insurance_bet
-                     # Add note to message or use toast?
-                     st.error(f"Player {i+1} loses £{insurance_bet} insurance bet.", icon="💸") # Use error toast for losing money
+                     st.error(f"Player {i+1} loses £{insurance_bet} insurance bet.", icon="💸") 
              
              self.insurance_offered = False # Insurance phase over
              # Now proceed with checking for player Blackjacks (since dealer didn't have one)
-             self.check_player_blackjacks()
-             # If game didn't end due to all players having BJ, advance turn normally
+             self.check_player_blackjacks() # This updates stand/bust flags for BJ players
+             
+             # If game didn't end due to all players having BJ, set up the first player's turn
              if not self.game_over:
-                 self.advance_turn(check_dealer_turn=False)
+                 # Find the first player who hasn't stood or busted (usually player 0 unless they had BJ)
+                 first_playable_player = -1
+                 for i in range(self.num_players):
+                     if not self.player_stand_flags[i] and not self.player_bust_flags[i]:
+                         first_playable_player = i
+                         break
+                 
+                 if first_playable_player != -1:
+                     self.current_player_index = first_playable_player
+                     # Toast is optional here, UI update will show active player
+                     # st.toast(f"Player {self.current_player_index + 1}'s turn.", icon="👤") 
+                 else:
+                     # All players finished (e.g., all got Blackjack). Check if dealer needs to play.
+                     all_players_finished_after_bj_check = all(self.player_stand_flags[i] or self.player_bust_flags[i] for i in range(self.num_players))
+                     if all_players_finished_after_bj_check:
+                         any_player_active = any(not self.player_bust_flags[i] for i in range(self.num_players))
+                         if any_player_active:
+                              st.toast("Dealer's turn!", icon="🤖")
+                              self.dealer_turn_active = True # Signal dealer turn in main loop
+                         else:
+                              st.toast("All players finished (BJ/Bust).", icon="🏁")
+                              self.game_over = True # Ensure game over if all busted/BJ after insurance
+                              
+                 # We DO NOT call advance_turn here anymore.
+                 # The rerun triggered by the insurance button press will update the UI 
+                 # based on the now-corrected current_player_index or game_over/dealer_turn_active state.
+                 # self.advance_turn(check_dealer_turn=False) # REMOVED THIS LINE
 
     def reset_game_state(self):
         """Resets the entire game state to initial values, including balances and deck."""
