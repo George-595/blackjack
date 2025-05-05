@@ -532,37 +532,48 @@ class BlackjackGame:
         dealer_has_blackjack = self.get_hand_display_value(self.dealer_hand) == "Blackjack!"
 
         if dealer_has_blackjack:
-            # ... (existing code for dealer having blackjack) ...
-            # st.warning("Dealer Blackjack!")
-            # self.dealer_turn_active = True # Reveal dealer's hand
-            # for i in range(self.num_players):
-            #     insurance_bet = self.player_insurance_bets[i]
-            #     player_bet = self.player_bets[i]
-            #     player_bj = self.get_hand_display_value(self.player_hands[i]) == "Blackjack!"
-            #     message = f"Player {i+1}: "
+            # --- Logic for Dealer having Blackjack --- 
+            st.warning("Dealer Blackjack!") 
+            # Reveal dealer's hand in the UI by marking turn potentially active or game over
+            # The hand display logic already shows full hand on game_over
+            # self.dealer_turn_active = True # Setting game_over is sufficient
+
+            for i in range(self.num_players):
+                insurance_bet = self.player_insurance_bets[i]
+                player_bet = self.player_bets[i]
+                player_bj = self.get_hand_display_value(self.player_hands[i]) == "Blackjack!"
+                message = f"Player {i+1}: "
                 
-            #     # Settle insurance bet
-            #     if insurance_bet > 0:
-            #          payout = insurance_bet * 2
-            #          self.player_balances[i] += payout 
-            #          self.dealer_balance -= payout
-            #          message += f"Wins £{payout} insurance. "
+                # Settle insurance bet (should be 0 if declined, but handle payout if taken)
+                if insurance_bet > 0:
+                     payout = insurance_bet * 2
+                     self.player_balances[i] += payout 
+                     self.dealer_balance -= payout
+                     message += f"Wins £{payout} insurance. "
+                elif self.player_made_insurance_decision[i]: # Only mention insurance loss if decision was made
+                     # No message needed for declined, only if they took and lost (handled in else block)
+                     # We don't need an explicit message for declining here as the outcome
+                     # depends on the main bet vs dealer BJ.
+                     pass
+
+                # Settle original bet (vs Dealer BJ)
+                if player_bj:
+                    message += "Pushes original bet (both Blackjack)."
+                    # No change to balance for original bet
+                else:
+                    message += f"Loses original bet (£{player_bet}) vs Dealer Blackjack."
+                    # Apply loss only if player didn't have BJ
+                    self.player_balances[i] -= player_bet
+                    self.dealer_balance += player_bet
                 
-            #     # Settle original bet (vs Dealer BJ)
-            #     if player_bj:
-            #         message += "Pushes original bet (both Blackjack)."
-            #         # No change to balance for original bet
-            #     else:
-            #         message += f"Loses original bet (£{player_bet})."
-            #         self.player_balances[i] -= player_bet
-            #         self.dealer_balance += player_bet
-                
-            #     self.player_messages[i] = message
-            #     self.player_stand_flags[i] = True # Hand is over
+                self.player_messages[i] = message
+                self.player_stand_flags[i] = True # Hand is over for everyone
             
-            # self.game_over = True
-            # self.insurance_offered = False # Insurance phase is done
-            pass # Keep existing code here
+            self.game_over = True
+            self.insurance_offered = False # Insurance phase is done
+            self.dealer_turn_active = False # Game is over, no more dealer turn
+            # No need to call check_player_blackjacks or advance_turn here
+            # The rerun from the button press will show the game over state
 
         else: # Dealer does NOT have Blackjack
              st.info("Dealer does not have Blackjack.")
