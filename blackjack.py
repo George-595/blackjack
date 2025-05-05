@@ -217,40 +217,49 @@ class BlackjackGame:
     def dealer_play(self):
         st.markdown("---") # Add separator
         st.markdown("#### Dealer's Turn")
-        
-        # Reveal hidden card initially
-        dealer_cards_html = '<div class="hand-container">'
-        for card in self.dealer_hand:
-             dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-        dealer_cards_html += '</div>'
-        st.markdown(dealer_cards_html, unsafe_allow_html=True)
-        st.markdown(f'<div class="hand-total">Dealer Total: {self.get_hand_display_value(self.dealer_hand)}</div>', unsafe_allow_html=True)
-        time.sleep(1)
+
+        # Helper function to display the current dealer hand within this turn's section
+        def display_dealer_hand_section():
+            dealer_cards_html = '<div class="hand-container">'
+            for card in self.dealer_hand:
+                 dealer_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+            dealer_cards_html += '</div>'
+            st.markdown(dealer_cards_html, unsafe_allow_html=True)
+            st.markdown(f'<div class="hand-total">Dealer Total: {self.get_hand_display_value(self.dealer_hand)}</div>', unsafe_allow_html=True)
+
+        # Initial display of the revealed hand at the start of the dealer's turn
+        display_dealer_hand_section()
+        time.sleep(1) # Pause to show the initial revealed hand
 
         while True:
             values, is_valid = self.calculate_hand_value(self.dealer_hand)
-            value_to_check = max(values) if is_valid else min(values) # Dealer stands on soft 17 or higher valid value, hits otherwise
-            
-            if value_to_check >= 17:
-                st.write("Dealer stands.")
-                break
-            
+            # Use highest valid value if available, otherwise the minimum busted value
+            value_to_check = max(values) if is_valid else min(values) 
+
+            # Stand condition: valid value >= 17 OR already busted (not is_valid)
+            if not is_valid or value_to_check >= 17:
+                if is_valid: # Only say "stands" if not busted
+                     st.write("Dealer stands.")
+                # No need to explicitly handle bust message here, it's shown after the hit if it occurs
+                break # Exit loop
+
+            # Hit condition
             st.write("Dealer hits...")
-            time.sleep(1)
+            time.sleep(1) # Pause before drawing
             new_card = self.deck.deal()
             self.dealer_hand.append(new_card)
-            
-            # Show the new card drawn
-            st.write("Dealer draws:")
-            new_card_html = f'<div class="hand-container"><div class="card {new_card.get_color()}">{new_card.value}<br>{new_card.get_symbol()}</div></div>'
-            st.markdown(new_card_html, unsafe_allow_html=True)
-            st.markdown(f'<div class="hand-total">New Dealer Total: {self.get_hand_display_value(self.dealer_hand)}</div>', unsafe_allow_html=True)
-            time.sleep(1)
 
-            # Check if dealer busted
+            # Redisplay the hand *with the new card*
+            st.write("Dealer draws:") # Indicate the action
+            display_dealer_hand_section() # Call display function again to show the updated hand
+            time.sleep(1) # Pause after showing the new card and total
+
+            # Check if dealer busted with the new card
             new_values, new_is_valid = self.calculate_hand_value(self.dealer_hand)
             if not new_is_valid:
-                st.write(f"Dealer busts with {min(new_values)}!")
+                # The bust message is implicitly shown by display_dealer_hand_section showing "Bust (value)"
+                # Add an explicit message for clarity
+                st.write(f"Dealer busts with {min(new_values)}!") 
                 break # Stop playing if dealer busts
 
     def evaluate_winner(self):
