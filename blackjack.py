@@ -117,17 +117,21 @@ class BlackjackGame:
         self.num_players = num_players
         self.deck = Deck()
         self.dealer_hand: List[Card] = []
-        self.player_hands: List[List[Card]] = [[] for _ in range(num_players)]
+        # Player state now tracks multiple hands per player
+        # Outer list: Players, Inner list: Hands for that player
+        self.player_hands: List[List[List[Card]]] = [[[]] for _ in range(num_players)]
         self.player_balances: List[int] = [50] * num_players
-        self.dealer_balance: int = 10000 # Give dealer a bit more starting balance
-        self.player_bets: List[int] = [5] * num_players
+        self.dealer_balance: int = 10000
+        self.player_bets: List[List[int]] = [[5] for _ in range(num_players)] # Bet per hand
+        self.player_stand_flags: List[List[bool]] = [[False] for _ in range(num_players)] # Stand flag per hand
+        self.player_bust_flags: List[List[bool]] = [[False] for _ in range(num_players)] # Bust flag per hand
         self.current_player_index: int = 0
-        self.player_stand_flags: List[bool] = [False] * num_players
-        self.player_bust_flags: List[bool] = [False] * num_players
-        self.player_messages: List[str] = [""] * num_players
-        self.game_over: bool = True # Start as game over until first deal
+        self.current_hand_indices: List[int] = [0] * num_players # Tracks active hand index for each player
+        self.player_split_flags: List[bool] = [False] * num_players # Tracks if player has split this round
+        self.player_messages: List[str] = [""] * num_players # Overall message per player for now
+        self.game_over: bool = True
         self.dealer_turn_active: bool = False
-        # Insurance state
+        # Insurance state (remains per player)
         self.insurance_offered: bool = False
         self.player_insurance_bets: List[int] = [0] * num_players
         self.player_made_insurance_decision: List[bool] = [False] * num_players
@@ -182,19 +186,31 @@ class BlackjackGame:
         return str(values[-1] if values else "Error") # Should always have a value
 
     def deal_initial_cards(self):
+        # Read the bets placed before dealing
+        initial_bets = [st.session_state.game.player_bets[i][0] for i in range(self.num_players)]
+        
         # Ensure deck has enough cards
         min_cards_needed = self.num_players * 2 + 2 + 10 # Players + Dealer + Buffer
         if len(self.deck.cards) < min_cards_needed:
             st.warning("Reshuffling shoe before new deal...")
             time.sleep(1)
             self.deck.reset_deck()
-            
+
+        # Reset player hand structures for the new round
+        self.player_hands = [[[]] for _ in range(self.num_players)]
+        self.player_bets = [[bet] for bet in initial_bets] # Use the bets placed
+        self.player_stand_flags = [[False] for _ in range(self.num_players)]
+        self.player_bust_flags = [[False] for _ in range(self.num_players)]
+        self.current_hand_indices = [0] * self.num_players # Start at the first hand
+        self.player_split_flags = [False] * self.num_players # Reset split status
+        self.player_messages = [""] * self.num_players # Clear previous messages
+
+        # Deal cards
         self.dealer_hand = [self.deck.deal(), self.deck.deal()]
-        self.player_hands = [[self.deck.deal(), self.deck.deal()] for _ in range(self.num_players)]
+        for i in range(self.num_players):
+            self.player_hands[i][0] = [self.deck.deal(), self.deck.deal()]
+            
         self.current_player_index = 0
-        self.player_stand_flags = [False] * self.num_players
-        self.player_bust_flags = [False] * self.num_players
-        self.player_messages = [""] * self.num_players
         self.game_over = False
         self.dealer_turn_active = False
         
@@ -206,54 +222,38 @@ class BlackjackGame:
         # Check dealer upcard for insurance offer condition
         dealer_upcard = self.dealer_hand[0] # The visible card
         offer_insurance_on_ace = dealer_upcard.value == 'A'
-        # Insurance should only be offered on Ace upcard according to standard rules
-        # offer_insurance_on_ten = dealer_upcard.get_value() == 10 # Removed this condition
 
         if offer_insurance_on_ace: # Only offer insurance if dealer shows Ace
              self.insurance_offered = True
              st.toast(f"Dealer showing Ace. Insurance offered!", icon="❓")
-             # Set current player to 0 to start insurance decisions
-             self.current_player_index = 0 
-             # UI will show insurance options for player 0
-             # Resolution will happen after player(s) choose
+             self.current_player_index = 0 # Start insurance decisions from player 0
         else:
-             # No insurance offered, proceed to check player BJs and set the first turn
-             self.check_player_blackjacks() # Check for player BJs vs non-BJ dealer
+             # No insurance offered, check player BJs (on their initial hand) and set the first turn
+             self.check_player_blackjacks() # Checks hand [0]
              
-             if not self.game_over: # Only proceed if the game didn't end due to all players having BJ
-                  # Find the first player who needs to play (hasn't stood/busted/got BJ)
+             if not self.game_over: 
+                  # Find the first player who needs to play (hasn't stood/busted/got BJ on hand 0)
                   first_playable_player = -1
                   for i in range(self.num_players):
-                       # Check flags set by check_player_blackjacks
-                       if not self.player_stand_flags[i] and not self.player_bust_flags[i]:
+                       # Check flags for the first hand
+                       if not self.player_stand_flags[i][0] and not self.player_bust_flags[i][0]:
                            first_playable_player = i
-                           break # Found the first player
+                           break 
                   
                   if first_playable_player != -1:
-                      # Set the current player index correctly
                       self.current_player_index = first_playable_player
-                      # Optional: Toast notification for the first player's turn
-                      # st.toast(f"Player {self.current_player_index + 1}'s turn.", icon="👤")
                   else:
-                      # Edge case: All players finished immediately (e.g., all got Blackjack)
-                      # check_player_blackjacks should set self.game_over = True in this case.
-                      # If not, check if dealer needs to play (only if some players stood without busting)
-                      all_players_finished = all(self.player_stand_flags[i] or self.player_bust_flags[i] for i in range(self.num_players))
+                      # All players finished immediately (e.g., all got Blackjack on hand 0)
+                      all_players_finished = all(self.player_stand_flags[i][0] or self.player_bust_flags[i][0] for i in range(self.num_players))
                       if all_players_finished:
-                          any_player_active = any(not self.player_bust_flags[i] for i in range(self.num_players))
+                          any_player_active = any(not self.player_bust_flags[i][0] for i in range(self.num_players))
                           if any_player_active:
-                              # This should generally only happen if dealer check was missed?
-                              # But as a safeguard, trigger dealer turn if players stood and dealer needs to play.
                               st.toast("Dealer's turn!", icon="🤖")
                               self.dealer_turn_active = True
                           else:
-                              # All busted or pushed with BJ - game is effectively over
-                              if not self.game_over: # Ensure game over is set if missed earlier
+                              if not self.game_over: 
                                    st.toast("All players finished.", icon="🏁") 
                                    self.game_over = True
-                      # Note: We no longer call advance_turn here. The state is set, 
-                      # and the UI rerender will reflect the correct player's turn or game state.
-                      # self.advance_turn(check_dealer_turn=False) # REMOVED THIS CALL
 
     def check_player_blackjacks(self):
         """Checks for player Blackjacks ONLY. Assumes dealer does NOT have BJ.
@@ -261,14 +261,14 @@ class BlackjackGame:
         """
         all_players_done = True
         for i in range(self.num_players):
-            if self.player_stand_flags[i] or self.player_bust_flags[i]:
+            if self.player_stand_flags[i][0] or self.player_bust_flags[i][0]:
                 continue # Skip players already finished (e.g., from split if implemented)
                 
-            player_total_str = self.get_hand_display_value(self.player_hands[i])
+            player_total_str = self.get_hand_display_value(self.player_hands[i][0])
             if player_total_str == "Blackjack!":
-                self.player_stand_flags[i] = True # Player with BJ stands automatically
+                self.player_stand_flags[i][0] = True # Player with BJ stands automatically
                 # Since we assume dealer doesn't have BJ here, player BJ wins
-                win_amount = int(self.player_bets[i] * 1.5)
+                win_amount = int(self.player_bets[i][0] * 1.5)
                 self.player_messages[i] = f"Player {i+1}: Blackjack! Wins £{win_amount}!"
                 self.player_balances[i] += win_amount
                 self.dealer_balance -= win_amount
@@ -282,111 +282,271 @@ class BlackjackGame:
             self.dealer_turn_active = False # No dealer turn needed
 
     def advance_turn(self, check_dealer_turn=True):
-        """Moves to the next player or triggers the dealer's turn."""
-        
-        # Find the next player index who hasn't stood or busted
-        next_player = self.current_player_index + 1
-        while next_player < self.num_players and (self.player_stand_flags[next_player] or self.player_bust_flags[next_player]):
-            next_player += 1
+        """Moves to the next playable hand for the current player, or to the next player, or triggers the dealer's turn."""
+        player_idx = self.current_player_index
+        current_hand_idx = self.current_hand_indices[player_idx]
 
-        if next_player < self.num_players:
-            self.current_player_index = next_player
-            st.toast(f"Player {self.current_player_index + 1}'s turn.", icon="👤")
-        elif check_dealer_turn:
-            # All players are done (stood or busted), check if dealer needs to play
-            all_players_finished = all(self.player_stand_flags[i] or self.player_bust_flags[i] for i in range(self.num_players))
-            if all_players_finished:
-                any_player_active = any(not self.player_bust_flags[i] for i in range(self.num_players))
-                if any_player_active:
-                     st.toast("All players done. Dealer's turn!", icon="🤖")
-                     self.dealer_turn_active = True # Signal dealer turn in main loop
-                     # The main loop will handle the rerun and calling dealer_play
-                else:
-                     st.toast("All players busted!", icon="💥")
-                     self.game_over = True # Evaluate happens naturally on rerun if all busted
-                     # No need to call evaluate_winner here explicitly, state update is enough
+        # 1. Check if the current player has more hands to play
+        next_hand_idx = current_hand_idx + 1
+        if next_hand_idx < len(self.player_hands[player_idx]):
+            # Move to the next hand for the current player
+            self.current_hand_indices[player_idx] = next_hand_idx
+            st.toast(f"Player {player_idx + 1}: Now playing Hand {next_hand_idx + 1}", icon="✋")
+            # Rerun needed to update UI for the next hand of the same player
+            # The button click that triggered advance_turn should handle the rerun
+            return # Stay on the same player
+
+        # 2. Current player is finished with all hands. Find the next player.
+        next_player_idx = player_idx + 1
+        found_next_player = False
+        while next_player_idx < self.num_players:
+            # Check if this next player has any hands that still need playing
+            next_player_has_playable_hand = False
+            first_playable_hand_idx = -1
+            for hand_i in range(len(self.player_hands[next_player_idx])):
+                if not self.player_stand_flags[next_player_idx][hand_i] and not self.player_bust_flags[next_player_idx][hand_i]:
+                    next_player_has_playable_hand = True
+                    first_playable_hand_idx = hand_i
+                    break # Found a playable hand for this player
+            
+            if next_player_has_playable_hand:
+                self.current_player_index = next_player_idx
+                self.current_hand_indices[next_player_idx] = first_playable_hand_idx
+                st.toast(f"Player {self.current_player_index + 1}'s turn (Hand {first_playable_hand_idx + 1}).", icon="👤")
+                found_next_player = True
+                # Rerun needed for UI update
+                return # Moved to the next player
+            
+            # If this player had no playable hands, check the next one
+            next_player_idx += 1 
+
+        # 3. No subsequent player found with playable hands.
+        if not found_next_player and check_dealer_turn:
+            # Check if *any* hand across *any* player is still active (not busted)
+            # If so, it's the dealer's turn. Otherwise, the game might be over.
+            all_hands_finished = True
+            any_hand_active_not_busted = False
+            for p_idx in range(self.num_players):
+                for h_idx in range(len(self.player_hands[p_idx])):
+                    is_busted = self.player_bust_flags[p_idx][h_idx]
+                    is_stood = self.player_stand_flags[p_idx][h_idx]
+                    if not is_busted and not is_stood: # Found a hand that's still playing (shouldn't happen if logic is correct)
+                        all_hands_finished = False
+                        # This case indicates an error in state transition, potentially log it.
+                        # For robustness, maybe try to find this player/hand again? Or force dealer turn? Let's assume it won't happen for now.
+                        break 
+                    if not is_busted: # Found a hand that finished without busting
+                        any_hand_active_not_busted = True
+                if not all_hands_finished: break # Optimization
+            
+            if not all_hands_finished:
+                 # This should ideally not be reached if hit/stand/split logic is correct
+                 st.error("Error: Found unfinished hand when advancing turn. Forcing dealer turn.")
+                 self.dealer_turn_active = True
+            elif any_hand_active_not_busted:
+                 # At least one player hand finished without busting, dealer needs to play
+                 st.toast("All players done. Dealer's turn!", icon="🤖")
+                 self.dealer_turn_active = True # Signal dealer turn in main loop
+            else:
+                 # All player hands busted out
+                 st.toast("All players busted!", icon="💥")
+                 self.game_over = True # Evaluate happens naturally via evaluate_winner if needed, or just game over
+                 self.dealer_turn_active = False
+            
+            # Rerun needed for UI update (dealer turn or game over)
 
     def hit(self):
         player_idx = self.current_player_index
-        # Check if player is allowed to hit (shouldn't happen if UI is correct, but good practice)
-        if self.player_stand_flags[player_idx] or self.player_bust_flags[player_idx]:
-             st.warning(f"Player {player_idx + 1} cannot hit now.")
+        hand_idx = self.current_hand_indices[player_idx]
+        
+        # Check if player is allowed to hit this hand
+        if self.player_stand_flags[player_idx][hand_idx] or self.player_bust_flags[player_idx][hand_idx]:
+             st.warning(f"Player {player_idx + 1} Hand {hand_idx + 1} cannot hit now.")
              return
 
         new_card = self.deck.deal()
-        self.player_hands[player_idx].append(new_card)
+        self.player_hands[player_idx][hand_idx].append(new_card)
         
-        st.toast(f"Player {player_idx + 1} draws: {new_card}", icon="🃏") 
-        # No sleep needed here, rerun will update UI
-        time.sleep(1.0) # Add a pause to see the card drawn
+        st.toast(f"Player {player_idx + 1} Hand {hand_idx + 1} draws: {new_card}", icon="🃏") 
+        time.sleep(1.0) 
 
-        values, is_valid = self.calculate_hand_value(self.player_hands[player_idx])
+        values, is_valid = self.calculate_hand_value(self.player_hands[player_idx][hand_idx])
         
-        if not is_valid: # Player busts
+        if not is_valid: # Player busts on this hand
             bust_value = min(values)
-            self.player_messages[player_idx] = f"Player {player_idx + 1}: Busts with {bust_value}!"
-            self.player_bust_flags[player_idx] = True
-            self.player_stand_flags[player_idx] = True # Busting means they are done
+            # Update message for this specific hand? For now, keep general player message.
+            self.player_messages[player_idx] = f"Player {player_idx + 1} Hand {hand_idx + 1}: Busts with {bust_value}!"
+            self.player_bust_flags[player_idx][hand_idx] = True
+            self.player_stand_flags[player_idx][hand_idx] = True # Busting means they are done with this hand
             # Adjust balances immediately on bust
-            self.dealer_balance += self.player_bets[player_idx]
-            self.player_balances[player_idx] -= self.player_bets[player_idx]
-            # Persistent message shown by main UI loop based on message
-            self.advance_turn() # Move to next player or dealer
+            self.dealer_balance += self.player_bets[player_idx][hand_idx]
+            self.player_balances[player_idx] -= self.player_bets[player_idx][hand_idx]
+            self.advance_turn() # Move to next hand/player
             
     def stand(self):
         player_idx = self.current_player_index
-        # Check if player is allowed to stand
-        if self.player_stand_flags[player_idx] or self.player_bust_flags[player_idx]:
-             st.warning(f"Player {player_idx + 1} cannot stand now.")
+        hand_idx = self.current_hand_indices[player_idx]
+
+        # Check if player is allowed to stand this hand
+        if self.player_stand_flags[player_idx][hand_idx] or self.player_bust_flags[player_idx][hand_idx]:
+             st.warning(f"Player {player_idx + 1} Hand {hand_idx + 1} cannot stand now.")
              return
              
-        st.toast(f"Player {player_idx + 1} stands.", icon="🛑")
-        self.player_stand_flags[player_idx] = True
-        self.advance_turn()
+        st.toast(f"Player {player_idx + 1} Hand {hand_idx + 1} stands.", icon="🛑")
+        self.player_stand_flags[player_idx][hand_idx] = True
+        self.advance_turn() # Move to next hand/player
                 
     def double_down(self):
         player_idx = self.current_player_index
-        # Check conditions
+        hand_idx = self.current_hand_indices[player_idx]
+        current_hand = self.player_hands[player_idx][hand_idx]
+        current_bet = self.player_bets[player_idx][hand_idx]
+
+        # Check conditions for this hand
         can_double = (
-            len(self.player_hands[player_idx]) == 2 and
-            self.player_balances[player_idx] >= self.player_bets[player_idx] * 2 and
-            not self.player_stand_flags[player_idx] and 
-            not self.player_bust_flags[player_idx]
+            len(current_hand) == 2 and
+            # Can only double down on first two cards of any hand (split or initial)
+            self.player_balances[player_idx] >= current_bet and # Need enough balance to double the bet for THIS hand
+            not self.player_stand_flags[player_idx][hand_idx] and 
+            not self.player_bust_flags[player_idx][hand_idx] and
+            not self.player_split_flags[player_idx] # Common rule: No double down after split? Let's enforce this for simplicity.
+            # Alternatively, allow double after split: remove the above line.
         )
 
         if can_double:
-            st.toast(f"Player {player_idx + 1} doubles down!", icon="💰")
-            self.player_bets[player_idx] *= 2
+            st.toast(f"Player {player_idx + 1} Hand {hand_idx + 1} doubles down!", icon="💰")
+            # Double the bet for this specific hand
+            self.player_bets[player_idx][hand_idx] *= 2
+            # Deduct the additional bet amount
+            self.player_balances[player_idx] -= current_bet 
             
             # Hit happens automatically
             new_card = self.deck.deal()
-            self.player_hands[player_idx].append(new_card)
-            st.toast(f"Player {player_idx + 1} draws: {new_card}", icon="🃏") 
+            self.player_hands[player_idx][hand_idx].append(new_card)
+            st.toast(f"Player {player_idx + 1} Hand {hand_idx + 1} draws: {new_card}", icon="🃏") 
             time.sleep(1.0) # Pause after double down hit
 
-            values, is_valid = self.calculate_hand_value(self.player_hands[player_idx])
-            self.player_stand_flags[player_idx] = True # Player is done after double down
+            values, is_valid = self.calculate_hand_value(self.player_hands[player_idx][hand_idx])
+            self.player_stand_flags[player_idx][hand_idx] = True # Player is done with this hand after double down
 
             if not is_valid: # Player busts on double down
                 bust_value = min(values)
-                self.player_messages[player_idx] = f"Player {player_idx + 1}: Busts with {bust_value} on double down!"
-                self.player_bust_flags[player_idx] = True
-                # Adjust balances immediately
-                self.dealer_balance += self.player_bets[player_idx]
-                self.player_balances[player_idx] -= self.player_bets[player_idx]
-                # Persistent message shown by main UI loop
+                self.player_messages[player_idx] = f"Player {player_idx + 1} Hand {hand_idx + 1}: Busts with {bust_value} on double down!"
+                self.player_bust_flags[player_idx][hand_idx] = True
+                # Balance was already adjusted for the doubled bet. Loss is implicit.
+                # Need to ensure dealer gets the doubled bet if player busts here.
+                self.dealer_balance += self.player_bets[player_idx][hand_idx] # Dealer collects the full doubled bet
+                # self.player_balances already reduced by original bet amount above.
             else:
-                # Display final hand value via toast or rely on main UI update
-                pass # st.toast(f"Player {player_idx + 1}'s final hand: {self.get_hand_display_value(self.player_hands[player_idx])}", icon="✅")
+                # Display final hand value? Let UI handle it.
+                 pass 
             
-            self.advance_turn() # Move to next player or dealer
+            self.advance_turn() # Move to next hand/player
         else:
-             st.warning(f"Player {player_idx + 1} cannot double down now.")
-                
+             # Give more specific feedback
+            reason = ""
+            if len(current_hand) != 2: reason = "Can only double on first two cards."
+            elif self.player_balances[player_idx] < current_bet: reason = f"Need £{current_bet} more to double."
+            elif self.player_stand_flags[player_idx][hand_idx] or self.player_bust_flags[player_idx][hand_idx]: reason = "Hand finished."
+            elif self.player_split_flags[player_idx]: reason = "Cannot double down after splitting."
+            else: reason = "Double down not allowed now."
+            st.warning(f"Player {player_idx + 1} Hand {hand_idx + 1}: Cannot double down. {reason}")
+
     def split(self):
-        # SPLIT LOGIC NEEDS SIGNIFICANT REWORK FOR MULTIPLAYER & MULTI-HANDS PER PLAYER
-        st.warning("Split functionality is complex and not implemented yet.")
-            
+        player_idx = self.current_player_index
+        hand_idx = self.current_hand_indices[player_idx]
+        
+        # --- Validity Checks ---
+        current_hand = self.player_hands[player_idx][hand_idx]
+        original_bet = self.player_bets[player_idx][hand_idx]
+        player_balance = self.player_balances[player_idx]
+        is_initial_hand = (hand_idx == 0) # Can only split the first hand dealt
+        has_split_already = self.player_split_flags[player_idx] # Simplification: No re-splitting allowed
+        can_afford = player_balance >= original_bet
+        correct_num_cards = len(current_hand) == 2
+        already_finished = self.player_stand_flags[player_idx][hand_idx] or self.player_bust_flags[player_idx][hand_idx]
+        
+        cards_match = False
+        if correct_num_cards:
+            cards_match = current_hand[0].get_value() == current_hand[1].get_value()
+ 
+        can_split = (is_initial_hand and 
+                       not has_split_already and 
+                       can_afford and 
+                       correct_num_cards and 
+                       cards_match and
+                       not already_finished)
+ 
+        if not can_split:
+            # Provide more specific feedback if possible
+            if not is_initial_hand: reason = "Can only split the initial hand."
+            elif has_split_already: reason = "Cannot re-split."
+            elif not correct_num_cards: reason = "Can only split a 2-card hand."
+            elif not cards_match: reason = "Cards must have the same value to split."
+            elif not can_afford: reason = f"Need £{original_bet} more to split."
+            elif already_finished: reason = "Cannot split a finished hand."
+            else: reason = "Split not allowed."
+            st.warning(f"Player {player_idx + 1}: Cannot split. {reason}")
+            return
+ 
+        # --- Perform Split --- 
+        st.toast(f"Player {player_idx + 1} splits!", icon="✂️")
+        self.player_split_flags[player_idx] = True # Mark that player has split
+        self.player_balances[player_idx] -= original_bet # Deduct bet for new hand
+ 
+        # Get the cards
+        card1 = current_hand[0]
+        card2 = current_hand[1]
+ 
+        # Add structures for the new hand
+        self.player_hands[player_idx].append([card2]) # New hand starts with card2
+        self.player_bets[player_idx].append(original_bet)
+        self.player_stand_flags[player_idx].append(False)
+        self.player_bust_flags[player_idx].append(False)
+        new_hand_idx = len(self.player_hands[player_idx]) - 1 # Index of the newly added hand
+ 
+        # Modify the original hand
+        self.player_hands[player_idx][hand_idx] = [card1] 
+ 
+        # Deal one card to each new hand
+        st.toast("Dealing to split hands...", icon="🃏")
+        time.sleep(0.5)
+        new_card_1 = self.deck.deal()
+        self.player_hands[player_idx][hand_idx].append(new_card_1)
+        st.toast(f"Player {player_idx+1} Hand {hand_idx+1} gets: {new_card_1}", icon="🃏")
+        time.sleep(0.8)
+         
+        new_card_2 = self.deck.deal()
+        self.player_hands[player_idx][new_hand_idx].append(new_card_2)
+        st.toast(f"Player {player_idx+1} Hand {new_hand_idx+1} gets: {new_card_2}", icon="🃏")
+        time.sleep(0.8)
+         
+        # --- Handle Special Cases (Aces / Blackjacks) --- 
+        is_ace_split = (card1.value == 'A')
+ 
+        if is_ace_split:
+            st.toast("Splitting Aces! Each hand gets one card and stands.", icon="⚠️")
+            self.player_stand_flags[player_idx][hand_idx] = True
+            self.player_stand_flags[player_idx][new_hand_idx] = True
+            # Player's turn on this hand might be technically over, advance_turn will handle moving
+            # to the next hand or player after the rerun.
+        else:
+            # Check for Blackjack on first hand (not possible on Ace split)
+            if self.get_hand_display_value(self.player_hands[player_idx][hand_idx]) == "Blackjack!":
+                st.success(f"Player {player_idx + 1} Hand {hand_idx + 1}: Blackjack!")
+                self.player_stand_flags[player_idx][hand_idx] = True
+             
+            # Check for Blackjack on second hand
+            if self.get_hand_display_value(self.player_hands[player_idx][new_hand_idx]) == "Blackjack!":
+                st.success(f"Player {player_idx + 1} Hand {new_hand_idx + 1}: Blackjack!")
+                self.player_stand_flags[player_idx][new_hand_idx] = True
+         
+        # Keep current_hand_indices[player_idx] at the current hand (hand_idx). 
+        # The player will play this hand first. advance_turn needs modification
+        # to handle moving to the next hand (new_hand_idx) for this player.
+        # For now, just rerun to update UI. The next action will be on hand 1.
+        # st.rerun() # Rerun will be handled by the button press in the UI section
+
     def dealer_play(self):
         # (No changes needed in the core hitting logic itself)
         # --- Dealer hitting logic remains the same ---
@@ -430,64 +590,83 @@ class BlackjackGame:
 
     def evaluate_winner(self):
         # Dealer should have finished playing before this is called
-        
         dealer_values, dealer_valid = self.calculate_hand_value(self.dealer_hand)
         dealer_value = 0
         dealer_display_value = self.get_hand_display_value(self.dealer_hand) # Get final string representation
+        is_dealer_busted = not dealer_valid
         if dealer_valid:
             dealer_value = dealer_values[-1]
-        elif dealer_values: # Check if list is not empty even if not valid
+        elif dealer_values: 
              dealer_value = min(dealer_values)
-        else: # Should not happen with dealer logic, but fallback
-             dealer_value = 99 # Bust value
+             dealer_display_value = f"Bust ({dealer_value})" # Ensure display shows bust
+        else: 
+             dealer_value = 99 # Bust value fallback
+             dealer_display_value = "Bust (Error)"
 
-        # Evaluate each player vs dealer
+        # Reset player messages to build results for this round
+        self.player_messages = [""] * self.num_players
+
+        # Evaluate each hand for each player vs dealer
         for player_idx in range(self.num_players):
-            # Skip players who already busted (message/balance handled previously)
-            if self.player_bust_flags[player_idx]:
-                continue
-                
-            # Skip players who got Blackjack (already paid)
-            if "Blackjack!" in self.player_messages[player_idx]:
-                 continue
+            player_round_message = f"Player {player_idx + 1} Results: "
+            num_hands = len(self.player_hands[player_idx])
+            
+            for hand_idx in range(num_hands):
+                hand_message = f"Hand {hand_idx + 1}: "
+                bet = self.player_bets[player_idx][hand_idx]
+                player_hand = self.player_hands[player_idx][hand_idx]
+                is_busted = self.player_bust_flags[player_idx][hand_idx]
 
-            player_values, player_valid = self.calculate_hand_value(self.player_hands[player_idx])
-            # Player should be valid if not busted, get highest value
-            player_value = player_values[-1] if player_valid else 0 # Should be > 0 if valid
+                if is_busted:
+                    # Message was set when busted, balance adjusted. Just note it here.
+                    # Player already lost `bet` when they busted.
+                    hand_message += f"Busted (-£{bet}). " 
+                    player_round_message += hand_message
+                    continue # Evaluate next hand
 
-            bet = self.player_bets[player_idx]
-            result_message = f"Player {player_idx + 1}: "
-            player_display = self.get_hand_display_value(self.player_hands[player_idx])
+                # Hand is not busted, get its value
+                player_values, player_valid = self.calculate_hand_value(player_hand)
+                # Ensure valid calculation (should always be valid if not busted)
+                player_value = player_values[-1] if player_valid else 0 
+                player_display = self.get_hand_display_value(player_hand)
+                # is_player_bj = player_display == "Blackjack!" # Use numeric value comparison primarily
 
-            if not dealer_valid:
-                result_message += f"Wins £{bet}! Dealer busts ({dealer_display_value})."
-                self.player_balances[player_idx] += bet
-                self.dealer_balance -= bet
-            elif player_value > dealer_value:
-                result_message += f"Wins £{bet}! ({player_display} vs {dealer_display_value})"
-                self.player_balances[player_idx] += bet
-                self.dealer_balance -= bet
-            elif dealer_value > player_value:
-                result_message += f"Loses £{bet}. ({player_display} vs {dealer_display_value})"
-                self.dealer_balance += bet
-                self.player_balances[player_idx] -= bet
-            else: # Push
-                result_message += f"Push! ({player_display})"
-                # No balance change
+                # --- Compare hand against dealer --- 
+                if is_dealer_busted:
+                    # Player wins unless busted (handled above)
+                    hand_message += f"Wins £{bet}! (Dealer busts). "
+                    self.player_balances[player_idx] += bet
+                    self.dealer_balance -= bet
+                elif player_value > dealer_value:
+                    hand_message += f"Wins £{bet}! ({player_display} vs {dealer_display_value}). "
+                    self.player_balances[player_idx] += bet
+                    self.dealer_balance -= bet
+                elif dealer_value > player_value:
+                    hand_message += f"Loses £{bet}. ({player_display} vs {dealer_display_value}). "
+                    # Only adjust balance here if player didn't bust (loss already applied on bust)
+                    self.dealer_balance += bet
+                    self.player_balances[player_idx] -= bet
+                else: # Push (player_value == dealer_value)
+                    # Handle Blackjack push specifically? Standard push is no balance change.
+                    # If player BJ vs dealer BJ, it's a push. If player 21 vs dealer 21, it's a push.
+                    hand_message += f"Push! ({player_display} vs {dealer_display_value}). "
+                    # No balance change
 
-            self.player_messages[player_idx] = result_message
+                player_round_message += hand_message
+            
+            # Store the combined result message for the player
+            self.player_messages[player_idx] = player_round_message.strip()
 
         self.game_over = True
         self.dealer_turn_active = False 
         # Don't rerun here, let the main loop handle the final display update
-        # st.rerun() 
 
     def take_insurance(self):
         player_idx = self.current_player_index
         if not self.insurance_offered or self.player_made_insurance_decision[player_idx]:
             return # Should not happen via UI, but safe check
 
-        insurance_cost = self.player_bets[player_idx] // 2 # Integer division
+        insurance_cost = self.player_bets[player_idx][0] // 2 # Integer division
         if self.player_balances[player_idx] < insurance_cost:
              st.warning(f"Player {player_idx + 1}: Not enough balance (£{self.player_balances[player_idx]}) for insurance (£{insurance_cost}).")
              # Automatically decline if insufficient funds?
@@ -540,8 +719,8 @@ class BlackjackGame:
 
             for i in range(self.num_players):
                 insurance_bet = self.player_insurance_bets[i]
-                player_bet = self.player_bets[i]
-                player_bj = self.get_hand_display_value(self.player_hands[i]) == "Blackjack!"
+                player_bet = self.player_bets[i][0]
+                player_bj = self.get_hand_display_value(self.player_hands[i][0]) == "Blackjack!"
                 message = f"Player {i+1}: "
                 
                 # Settle insurance bet (should be 0 if declined, but handle payout if taken)
@@ -567,7 +746,7 @@ class BlackjackGame:
                     self.dealer_balance += player_bet
                 
                 self.player_messages[i] = message
-                self.player_stand_flags[i] = True # Hand is over for everyone
+                self.player_stand_flags[i][0] = True # Hand is over for everyone
             
             self.game_over = True
             self.insurance_offered = False # Insurance phase is done
@@ -595,7 +774,7 @@ class BlackjackGame:
                  # Find the first player who hasn't stood or busted (usually player 0 unless they had BJ)
                  first_playable_player = -1
                  for i in range(self.num_players):
-                     if not self.player_stand_flags[i] and not self.player_bust_flags[i]:
+                     if not self.player_stand_flags[i][0] and not self.player_bust_flags[i][0]:
                          first_playable_player = i
                          break
                  
@@ -605,9 +784,9 @@ class BlackjackGame:
                      # st.toast(f"Player {self.current_player_index + 1}'s turn.", icon="👤") 
                  else:
                      # All players finished (e.g., all got Blackjack). Check if dealer needs to play.
-                     all_players_finished_after_bj_check = all(self.player_stand_flags[i] or self.player_bust_flags[i] for i in range(self.num_players))
+                     all_players_finished_after_bj_check = all(self.player_stand_flags[i][0] or self.player_bust_flags[i][0] for i in range(self.num_players))
                      if all_players_finished_after_bj_check:
-                         any_player_active = any(not self.player_bust_flags[i] for i in range(self.num_players))
+                         any_player_active = any(not self.player_bust_flags[i][0] for i in range(self.num_players))
                          if any_player_active:
                               st.toast("Dealer's turn!", icon="🤖")
                               self.dealer_turn_active = True # Signal dealer turn in main loop
@@ -625,16 +804,20 @@ class BlackjackGame:
         st.toast("Resetting game state...", icon="🔄")
         self.deck = Deck() # Reset and reshuffle the deck
         self.dealer_hand: List[Card] = []
-        self.player_hands: List[List[Card]] = [[] for _ in range(self.num_players)]
+        # Reset player state for multiple hands
+        self.player_hands: List[List[List[Card]]] = [[[]] for _ in range(self.num_players)]
         self.player_balances: List[int] = [50] * self.num_players
         self.dealer_balance: int = 10000
-        self.player_bets: List[int] = [5] * self.num_players
+        self.player_bets: List[List[int]] = [[5] for _ in range(self.num_players)] # Reset to single bet
+        self.player_stand_flags: List[List[bool]] = [[False] for _ in range(self.num_players)] # Reset to single hand state
+        self.player_bust_flags: List[List[bool]] = [[False] for _ in range(self.num_players)] # Reset to single hand state
         self.current_player_index: int = 0
-        self.player_stand_flags: List[bool] = [False] * self.num_players
-        self.player_bust_flags: List[bool] = [False] * self.num_players
+        self.current_hand_indices: List[int] = [0] * self.num_players # Reset active hand index
+        self.player_split_flags: List[bool] = [False] * self.num_players # Reset split status
         self.player_messages: List[str] = [""] * self.num_players
         self.game_over: bool = True # Game is over after reset, ready for new deal
         self.dealer_turn_active: bool = False
+        # Reset insurance state
         self.insurance_offered: bool = False
         self.player_insurance_bets: List[int] = [0] * self.num_players
         self.player_made_insurance_decision: List[bool] = [False] * self.num_players
@@ -709,7 +892,7 @@ for i in range(st.session_state.player_count):
         player_balance = st.session_state.game.player_balances[i]
         dealer_balance = st.session_state.game.dealer_balance
         # Read the bet value intended before this round started
-        current_bet = st.session_state.game.player_bets[i]
+        current_bet = st.session_state.game.player_bets[i][0]
 
         st.write(f"**Player {i+1}**") # Display player number regardless
 
@@ -717,11 +900,11 @@ for i in range(st.session_state.player_count):
         if player_balance < min_bet:
             # Ensure bet is 0 if they cannot afford minimum
             if not betting_disabled:
-                 st.session_state.game.player_bets[i] = 0
+                 st.session_state.game.player_bets[i][0] = 0
             st.caption(f"Insufficient balance (£{player_balance}) for min bet (£{min_bet}).")
             # Display the current bet (which is 0) as static text if disabled
             if betting_disabled:
-                 st.write(f"Bet: £{st.session_state.game.player_bets[i]}")
+                 st.write(f"Bet: £{st.session_state.game.player_bets[i][0]}")
             continue # Skip slider for this player
 
         # Calculate potential max bet based on balances and game cap
@@ -731,11 +914,11 @@ for i in range(st.session_state.player_count):
         if max_bet_possible < min_bet:
             # Ensure bet is 0 if the minimum cannot be placed
             if not betting_disabled:
-                 st.session_state.game.player_bets[i] = 0
+                 st.session_state.game.player_bets[i][0] = 0
             st.caption(f"Cannot place min bet (£{min_bet}). Max possible is £{max_bet_possible} (check balances).")
             # Display the current bet (which is 0) as static text if disabled
             if betting_disabled:
-                 st.write(f"Bet: £{st.session_state.game.player_bets[i]}")
+                 st.write(f"Bet: £{st.session_state.game.player_bets[i][0]}")
             continue # Skip slider for this player
 
         # --- Slider Rendering ---
@@ -748,7 +931,7 @@ for i in range(st.session_state.player_count):
         # Store the potentially clamped value back into state *if* betting is currently allowed
         # This corrects the state if the previous value was invalid due to balance changes
         if not betting_disabled:
-             st.session_state.game.player_bets[i] = clamped_value_for_slider
+             st.session_state.game.player_bets[i][0] = clamped_value_for_slider
 
         # Display the slider - parameters are now guaranteed to be valid
         new_bet = st.slider(f"Bet", # Simplified label
@@ -763,7 +946,7 @@ for i in range(st.session_state.player_count):
         # and betting is not disabled. Compare slider output 'new_bet' with the value
         # it was initialized with 'clamped_value_for_slider'.
         if not betting_disabled and new_bet != clamped_value_for_slider:
-            st.session_state.game.player_bets[i] = new_bet
+            st.session_state.game.player_bets[i][0] = new_bet
             # Note: No st.rerun() here, the 'Deal' button will use the latest bet value
 
 # --- Display Persistent Game Result Messages ---
@@ -844,104 +1027,131 @@ if st.session_state.game.dealer_hand:
     # st.markdown("---") # Separator - Remove this as columns handle separation
 
     # --- Player Hands & Actions (in subsequent columns) --- 
-    # player_cols = st.columns(st.session_state.player_count) # Remove this, use game_cols
-    # current_player_idx = st.session_state.game.current_player_index # Already defined
-    # game = st.session_state.game # Already defined
-
     for i in range(game.num_players):
         with game_cols[i + 1]: # Start from the second column (index 1)
-            # Highlight current player during play phase OR during insurance phase
-            is_player_active = (not game.player_stand_flags[i] and not game.player_bust_flags[i])
-            is_regular_turn = (i == current_player_idx and is_player_active and not game.dealer_turn_active and not game.insurance_offered)
-            is_insurance_decision_turn = (i == current_player_idx and is_player_active and game.insurance_offered and not game.player_made_insurance_decision[i])
-            
-            is_current_turn = is_regular_turn or is_insurance_decision_turn
-                                 
-            border_style = "border: 3px solid #007bff; border-radius: 10px; padding: 10px; margin-bottom: 10px;" if is_current_turn else "border: 1px solid #ddd; border-radius: 5px; padding: 10px; margin-bottom: 10px;"
-            st.markdown(f'<div style="{border_style}">', unsafe_allow_html=True) # Corrected markdown start tag
-            st.markdown(f"##### Player {i+1} (Bet: £{game.player_bets[i]})")
+            st.markdown(f"##### Player {i+1}") # Main player title
 
-            # Display Hand
-            player_cards_html = '<div class="hand-container">'
-            for card in game.player_hands[i]:
-                player_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
-            player_cards_html += '</div>'
-            st.markdown(player_cards_html, unsafe_allow_html=True)
-            st.markdown(f'<div class="hand-total">Total: {game.get_hand_display_value(game.player_hands[i])}</div>', unsafe_allow_html=True)
-
-            # Display Player Status (Busted/Stood/Blackjack)
-            if game.player_bust_flags[i]:
-                st.error("BUSTED")
-            elif "Blackjack!" in game.player_messages[i] and "Push" not in game.player_messages[i]: # Check if message indicates BJ win
-                 st.success("BLACKJACK!")
-            elif game.player_stand_flags[i]: # Includes players who stood or got non-winning BJ
-                st.info("Finished") # More neutral term than STOOD
-
-            # --- Action Buttons Logic ---
-            # Buttons are only shown for the player whose turn it is
-            if is_current_turn:
-                # Display whose turn it is
-                if game.num_players == 1:
-                    st.markdown("**Your Go**")
-                else:
-                    st.markdown(f"**Player {i+1}'s Turn**")
-
-                # === Insurance Phase Buttons ===
-                if game.insurance_offered and not game.player_made_insurance_decision[i]:
-                    st.markdown("**Insurance?**")
-                    max_insurance = game.player_bets[i] // 2
-                    can_afford_insurance = game.player_balances[i] >= max_insurance
-                    
-                    # Use columns for insurance buttons for better layout
-                    ins_cols = st.columns(2)
-                    with ins_cols[0]:
-                        if st.button(f"Take (£{max_insurance})", use_container_width=True, disabled=not can_afford_insurance, key=f"ins_take_{i}"):
-                            game.take_insurance()
-                            st.rerun()
-                    with ins_cols[1]:
-                         if st.button("Decline", use_container_width=True, key=f"ins_decline_{i}"):
-                             game.decline_insurance()
-                             st.rerun()
-                    if not can_afford_insurance and max_insurance > 0:
-                         st.caption(f"(Needs £{max_insurance})", help=f"Balance: £{game.player_balances[i]}")
-                    elif max_insurance <= 0:
-                         st.caption("(Min bet needed)", help="Insurance requires a base bet.")
+            # --- Loop through hands for this player ---
+            for h in range(len(game.player_hands[i])):
+                current_hand = game.player_hands[i][h]
+                current_bet = game.player_bets[i][h]
+                is_stood = game.player_stand_flags[i][h]
+                is_busted = game.player_bust_flags[i][h]
+                is_active_hand = (i == current_player_idx and h == game.current_hand_indices[i] and not is_stood and not is_busted)
+                is_active_player_insurance_turn = (i == current_player_idx and game.insurance_offered and not game.player_made_insurance_decision[i])
                 
-                # === Regular Play Phase Buttons ===
-                elif not game.insurance_offered: # Only show play buttons if insurance wasn't offered or is resolved
-                    # Use 3 columns now since Split is disabled
-                    action_cols = st.columns(3)
-                    current_hand = game.player_hands[i]
-                    current_balance = game.player_balances[i]
-                    current_bet = game.player_bets[i] # Original bet before double
+                # Determine highlighting: Highlight based on active hand during play, or active player during insurance
+                is_highlighted = False
+                if game.insurance_offered:
+                    is_highlighted = is_active_player_insurance_turn # Highlight player deciding insurance
+                elif not game.dealer_turn_active and not game.game_over:
+                    is_highlighted = is_active_hand # Highlight the specific hand being played
 
-                    # Check conditions based on current state
-                    can_hit_stand = not game.player_stand_flags[i] and not game.player_bust_flags[i]
-                    can_double = can_hit_stand and len(current_hand) == 2 and current_balance >= current_bet # Check balance vs original bet for doubling cost
-                    # can_split = False # Disabled for now
+                border_style = "border: 3px solid #007bff; border-radius: 10px; padding: 10px; margin-bottom: 10px;" if is_highlighted else "border: 1px solid #ddd; border-radius: 5px; padding: 10px; margin-bottom: 10px;"
+                st.markdown(f'<div style="{border_style}">', unsafe_allow_html=True)
+                
+                st.markdown(f"**Hand {h + 1}** (Bet: £{current_bet})")
 
-                    with action_cols[0]:
-                        if st.button("Hit", use_container_width=True, disabled=not can_hit_stand, key=f"hit_{i}"):
-                            game.hit()
-                            st.rerun() 
-                    with action_cols[1]:
-                        if st.button("Stand", use_container_width=True, disabled=not can_hit_stand, key=f"stand_{i}"):
-                            game.stand() 
-                            st.rerun() 
-                    with action_cols[2]:
-                        if st.button("Double Down", use_container_width=True, disabled=not can_double, key=f"double_{i}"):
-                            # Double down cost is the original bet amount again
-                            if game.player_balances[i] < game.player_bets[i]:
-                                 st.warning(f"Need £{game.player_bets[i]} more to double.")
-                            else:
-                                 game.double_down()
-                                 st.rerun() 
-                    # Removed the 4th column for the disabled Split button
-                    # with action_cols[3]:
-                    #    if st.button("Split", use_container_width=True, disabled=True, key=f"split_{i}"):
-                    #        st.warning("Split not implemented.")
-                            
-            st.markdown('</div>' , unsafe_allow_html=True) # Close player highlight div
+                # Display Hand Cards
+                player_cards_html = '<div class="hand-container">'
+                if not current_hand: # Handle case where hand might be empty initially (e.g., during reset/deal error)
+                    player_cards_html += "(No cards)"
+                else:
+                    for card in current_hand:
+                        player_cards_html += f'<div class="card {card.get_color()}">{card.value}<br>{card.get_symbol()}</div>'
+                player_cards_html += '</div>'
+                st.markdown(player_cards_html, unsafe_allow_html=True)
+                
+                # Display Hand Total (only if cards exist)
+                if current_hand:
+                    st.markdown(f'<div class="hand-total">Total: {game.get_hand_display_value(current_hand)}</div>', unsafe_allow_html=True)
+
+                # Display Hand Status (Busted/Stood/Blackjack)
+                if is_busted:
+                    st.error("BUSTED")
+                elif is_stood:
+                     # Check for Blackjack specifically on stand? evaluate_winner handles results.
+                     # Let's just show "Finished" if stood.
+                     hand_val_str = game.get_hand_display_value(current_hand)
+                     if hand_val_str == "Blackjack!":
+                          st.success("BLACKJACK!") # Indicate BJ status clearly
+                     else: 
+                          st.info("Finished") # More neutral term than STOOD
+
+                # --- Action Buttons Logic --- 
+                # Show buttons only if it's this specific hand's turn OR this player's insurance turn
+                if is_highlighted: # Use the highlighting flag
+                    # Display whose turn it is (player level)
+                    if game.num_players > 1 or len(game.player_hands[i]) > 1:
+                        st.markdown(f"**Player {i+1} Active Hand {h+1}**" if not game.insurance_offered else f"**Player {i+1} Insurance?**")
+                    else:
+                         st.markdown("**Your Go**" if not game.insurance_offered else "**Insurance?**")
+
+                    # === Insurance Phase Buttons (Show once per player) ===
+                    if game.insurance_offered and h == 0: # Show insurance options only once, with the first hand display
+                        max_insurance = game.player_bets[i][0] // 2 # Insurance based on original bet
+                        can_afford_insurance = game.player_balances[i] >= max_insurance
+                        
+                        ins_cols = st.columns(2)
+                        with ins_cols[0]:
+                            if st.button(f"Take (£{max_insurance})", use_container_width=True, disabled=not can_afford_insurance, key=f"ins_take_{i}"): # Key per player
+                                game.take_insurance()
+                                st.rerun()
+                        with ins_cols[1]:
+                            if st.button("Decline", use_container_width=True, key=f"ins_decline_{i}"): # Key per player
+                                game.decline_insurance()
+                                st.rerun()
+                        if not can_afford_insurance and max_insurance > 0:
+                            st.caption(f"(Needs £{max_insurance})", help=f"Balance: £{game.player_balances[i]}")
+                        elif max_insurance <= 0:
+                            st.caption("(Min bet needed)", help="Insurance requires a base bet.")
+                    
+                    # === Regular Play Phase Buttons (Show per active hand) ===
+                    elif not game.insurance_offered and not game.dealer_turn_active and not game.game_over:
+                        action_cols = st.columns(4) # Add column for Split
+                        player_balance = game.player_balances[i]
+
+                        # Check conditions for this specific hand
+                        can_hit_stand = not is_stood and not is_busted
+                        # Double down condition (check original bet amount for cost)
+                        can_double = (can_hit_stand and 
+                                      len(current_hand) == 2 and 
+                                      player_balance >= current_bet and # Balance >= Bet for THIS hand
+                                      not game.player_split_flags[i]) # No double after split rule
+                        # Split condition
+                        can_split = (can_hit_stand and
+                                     h == 0 and # Can only split initial hand
+                                     not game.player_split_flags[i] and # Cannot re-split
+                                     len(current_hand) == 2 and
+                                     current_hand[0].get_value() == current_hand[1].get_value() and
+                                     player_balance >= current_bet) # Check balance vs bet of hand 0
+
+                        with action_cols[0]:
+                            if st.button("Hit", use_container_width=True, disabled=not can_hit_stand, key=f"hit_{i}_{h}"): # Unique key
+                                game.hit()
+                                st.rerun() 
+                        with action_cols[1]:
+                            if st.button("Stand", use_container_width=True, disabled=not can_hit_stand, key=f"stand_{i}_{h}"): # Unique key
+                                game.stand() 
+                                st.rerun() 
+                        with action_cols[2]:
+                            if st.button("Double Down", use_container_width=True, disabled=not can_double, key=f"double_{i}_{h}"): # Unique key
+                                # Double down cost is the bet amount for this hand again
+                                if game.player_balances[i] < current_bet:
+                                    st.warning(f"Need £{current_bet} more to double.") # Check vs current_bet
+                                else:
+                                    game.double_down()
+                                    st.rerun() 
+                        with action_cols[3]:
+                           if st.button("Split", use_container_width=True, disabled=not can_split, key=f"split_{i}_{h}"): # Unique key
+                               # Check affordability again just before action
+                               if game.player_balances[i] < current_bet:
+                                    st.warning(f"Need £{current_bet} more to split.")
+                               else:
+                                    game.split()
+                                    st.rerun()
+                                
+                st.markdown('</div>' , unsafe_allow_html=True) # Close hand highlight div
 
 # --- Dealer Turn Logic (Keep at the end) --- 
 # Check if it's time for the dealer to play (flag set by advance_turn)
