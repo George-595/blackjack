@@ -238,17 +238,19 @@ class BlackjackGame:
 
             # Stand condition: valid value >= 17 OR already busted (not is_valid)
             if not is_valid or value_to_check >= 17:
-                if is_valid: # Only say "stands" if not busted
-                     st.write("Dealer stands.")
+                # if is_valid: # Only say "stands" if not busted
+                     # st.write("Dealer stands.") # REMOVE THIS LINE
                 # No need to explicitly handle bust message here, it's shown after the hit if it occurs
                 break # Exit loop
 
             # Hit condition
+            # st.write("Dealer hits...") # Already removed
             time.sleep(1) # Pause before drawing
             new_card = self.deck.deal()
             self.dealer_hand.append(new_card)
 
             # Redisplay the hand *with the new card*
+            # st.write("Dealer draws:") # Already removed
             display_dealer_hand_section() # Call display function again to show the updated hand
             time.sleep(1) # Pause after showing the new card and total
 
@@ -257,7 +259,7 @@ class BlackjackGame:
             if not new_is_valid:
                 # The bust message is implicitly shown by display_dealer_hand_section showing "Bust (value)"
                 # Add an explicit message for clarity
-                st.write(f"Dealer busts with {min(new_values)}!") 
+                # st.write(f"Dealer busts with {min(new_values)}!") # REMOVE THIS LINE
                 break # Stop playing if dealer busts
 
     def evaluate_winner(self):
