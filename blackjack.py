@@ -268,18 +268,18 @@ class BlackjackGame:
         dealer_value = max(dealer_values) if dealer_valid else min(dealer_values)
 
         result_message = ""
-        result_icon = "🏁"
+        # result_icon = "🏁" # Icon no longer needed for persistent message
 
         # Use message generated during player hit() if player busted
         if "busts" in self.message:
             result_message = self.message # Already set during hit()
-            result_icon = "💥"
+            # result_icon = "💥"
             # Balance already adjusted in hit()
         elif not dealer_valid:
             result_message = f"Dealer busts with {dealer_value}! Player wins!"
             self.player_balance += self.current_bet
             self.dealer_balance -= self.current_bet
-            result_icon = "🎉"
+            # result_icon = "🎉"
         elif not player_valid: # Check again in case hit() logic changes
              result_message = f"Player busts with {player_value}! Dealer wins!"
              # Balance already adjusted in hit() if it happened there
@@ -287,28 +287,28 @@ class BlackjackGame:
              if not self.game_over: # Avoid double adjustment
                  self.dealer_balance += self.current_bet
                  self.player_balance -= self.current_bet
-             result_icon = "👎"
+             # result_icon = "👎"
         elif player_value > dealer_value:
             result_message = "Player wins!"
             self.player_balance += self.current_bet
             self.dealer_balance -= self.current_bet
-            result_icon = "🎉"
+            # result_icon = "🎉"
         elif dealer_value > player_value:
             result_message = "Dealer wins!"
             self.dealer_balance += self.current_bet
             self.player_balance -= self.current_bet
-            result_icon = "👎"
+            # result_icon = "👎"
         else:
             result_message = "Push!"
-            result_icon = "🤝"
+            # result_icon = "🤝" # Icon no longer needed
 
         self.message = result_message # Update internal message state
         self.game_over = True
         self.dealer_turn_active = False # Ensure dealer turn is marked as over
 
-        # Display result using toast
-        st.toast(result_message, icon=result_icon)
-        st.rerun() # Rerun AFTER evaluation to update balances and UI state
+        # REMOVE toast for result message
+        # st.toast(result_message, icon=result_icon)
+        st.rerun() # Rerun AFTER evaluation to update balances and trigger persistent message display
 
 # Initialize session state
 if 'game' not in st.session_state:
@@ -340,12 +340,23 @@ with col2:
 bet = st.slider("Bet Amount", min_value=5, max_value=min(st.session_state.game.player_balance, st.session_state.game.dealer_balance), step=5)
 st.session_state.game.current_bet = bet
 
+# --- Display Persistent Game Result Message --- 
+if st.session_state.game.game_over and st.session_state.game.message:
+    message = st.session_state.game.message
+    if "Player wins" in message or "Dealer busts" in message:
+        st.success(message)
+    elif "Dealer wins" in message or "Player busts" in message:
+        st.error(message)
+    else: # Push
+        st.info(message)
+
 # Game controls
 if st.button("Deal New Hand", use_container_width=True):
     st.session_state.game.deal_initial_cards()
     st.session_state.game.game_over = False
     st.session_state.game.dealer_turn_active = False # Reset dealer turn state
-    st.rerun() # Rerun to show the new hand
+    st.session_state.game.message = "" # Clear previous result message
+    st.rerun() # Rerun to show the new hand and clear the message
 
 # Display hands side-by-side
 if st.session_state.game.dealer_hand: # Only display if a hand has been dealt
