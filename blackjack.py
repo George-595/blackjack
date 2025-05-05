@@ -244,13 +244,11 @@ class BlackjackGame:
                 break # Exit loop
 
             # Hit condition
-            st.write("Dealer hits...")
             time.sleep(1) # Pause before drawing
             new_card = self.deck.deal()
             self.dealer_hand.append(new_card)
 
             # Redisplay the hand *with the new card*
-            st.write("Dealer draws:") # Indicate the action
             display_dealer_hand_section() # Call display function again to show the updated hand
             time.sleep(1) # Pause after showing the new card and total
 
