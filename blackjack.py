@@ -684,7 +684,7 @@ for i in range(st.session_state.player_count):
 with balance_cols[st.session_state.player_count]:
     st.markdown(f'<div class="balance-display">Dealer: £{st.session_state.game.dealer_balance}</div>', unsafe_allow_html=True)
 
-# --- Betting Section --- 
+# --- Betting Section ---
 st.subheader("Place Your Bets")
 # Disable betting if game is in progress OR insurance phase is active
 betting_disabled = not st.session_state.game.game_over or st.session_state.game.insurance_offered
@@ -695,36 +695,67 @@ bet_cols = st.columns(st.session_state.player_count)
 for i in range(st.session_state.player_count):
     with bet_cols[i]:
         min_bet = 5
-        # Ensure max_bet doesn't exceed player balance or dealer balance (simplified ceiling)
-        max_bet_possible = min(st.session_state.game.player_balances[i], st.session_state.game.dealer_balance, 100) # Cap max bet reasonably
-        
-        # Display bet amount or message if unable to bet
-        if st.session_state.game.player_balances[i] < min_bet:
-             st.session_state.game.player_bets[i] = 0 # Player can't bet
-             st.write(f"**Player {i+1}**")
-             st.caption(f"Insufficient balance (£{st.session_state.game.player_balances[i]}) for min bet (£{min_bet}).")
-        else:
-             # Ensure the default/current value is within allowed range
-             current_bet_value = st.session_state.game.player_bets[i]
-             clamped_bet_value = max(min_bet, min(current_bet_value, max_bet_possible))
-             
-             # Store clamped value back if betting is enabled, otherwise just display stored value
-             if not betting_disabled:
-                 st.session_state.game.player_bets[i] = clamped_bet_value
+        player_balance = st.session_state.game.player_balances[i]
+        dealer_balance = st.session_state.game.dealer_balance
+        # Read the bet value intended before this round started
+        current_bet = st.session_state.game.player_bets[i]
 
-             new_bet = st.slider(f"Player {i+1} Bet", 
-                                 min_value=min_bet, 
-                                 max_value=max_bet_possible, 
-                                 value=clamped_bet_value,
-                                 step=5, 
-                                 key=f"bet_slider_{i}",
-                                 disabled=betting_disabled)
-             # Update the bet in session state if slider is changed and not disabled
-             if not betting_disabled and new_bet != clamped_bet_value:
-                 st.session_state.game.player_bets[i] = new_bet
-                 # No rerun needed here, value updates on next script run
+        st.write(f"**Player {i+1}**") # Display player number regardless
 
-# --- Display Persistent Game Result Messages --- 
+        # Condition 1: Player doesn't have minimum balance
+        if player_balance < min_bet:
+            # Ensure bet is 0 if they cannot afford minimum
+            if not betting_disabled:
+                 st.session_state.game.player_bets[i] = 0
+            st.caption(f"Insufficient balance (£{player_balance}) for min bet (£{min_bet}).")
+            # Display the current bet (which is 0) as static text if disabled
+            if betting_disabled:
+                 st.write(f"Bet: £{st.session_state.game.player_bets[i]}")
+            continue # Skip slider for this player
+
+        # Calculate potential max bet based on balances and game cap
+        max_bet_possible = min(player_balance, dealer_balance, 100)
+
+        # Condition 2: Max possible bet is less than min bet (e.g., dealer low balance)
+        if max_bet_possible < min_bet:
+            # Ensure bet is 0 if the minimum cannot be placed
+            if not betting_disabled:
+                 st.session_state.game.player_bets[i] = 0
+            st.caption(f"Cannot place min bet (£{min_bet}). Max possible is £{max_bet_possible} (check balances).")
+            # Display the current bet (which is 0) as static text if disabled
+            if betting_disabled:
+                 st.write(f"Bet: £{st.session_state.game.player_bets[i]}")
+            continue # Skip slider for this player
+
+        # --- Slider Rendering ---
+        # If we reach here, a valid bet between min_bet and max_bet_possible can be placed.
+
+        # Ensure the value displayed/used by the slider is within the valid range [min_bet, max_bet_possible]
+        # Clamp the potentially stale 'current_bet' from state to the valid range
+        clamped_value_for_slider = max(min_bet, min(current_bet, max_bet_possible))
+
+        # Store the potentially clamped value back into state *if* betting is currently allowed
+        # This corrects the state if the previous value was invalid due to balance changes
+        if not betting_disabled:
+             st.session_state.game.player_bets[i] = clamped_value_for_slider
+
+        # Display the slider - parameters are now guaranteed to be valid
+        new_bet = st.slider(f"Bet", # Simplified label
+                            min_value=min_bet,
+                            max_value=max_bet_possible,
+                            value=clamped_value_for_slider,
+                            step=5,
+                            key=f"bet_slider_{i}",
+                            disabled=betting_disabled)
+
+        # Update the bet in session state ONLY if the user changed the slider value
+        # and betting is not disabled. Compare slider output 'new_bet' with the value
+        # it was initialized with 'clamped_value_for_slider'.
+        if not betting_disabled and new_bet != clamped_value_for_slider:
+            st.session_state.game.player_bets[i] = new_bet
+            # Note: No st.rerun() here, the 'Deal' button will use the latest bet value
+
+# --- Display Persistent Game Result Messages ---
 # Show messages only when game is over and not in insurance phase
 if st.session_state.game.game_over and not st.session_state.game.insurance_offered:
     result_cols = st.columns(st.session_state.player_count)
